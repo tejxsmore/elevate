@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -136,12 +137,6 @@ func (s *RecordingService) StoreTwilioRecording(
 		)
 	}
 
-	if callID == uuid.Nil {
-		return "", fmt.Errorf(
-			"recording call ID is empty",
-		)
-	}
-
 	recordingSID = strings.TrimSpace(
 		recordingSID,
 	)
@@ -162,16 +157,31 @@ func (s *RecordingService) StoreTwilioRecording(
 		)
 	}
 
-	resp, err :=
-		s.downloadTwilioRecording(
-			ctx,
-			recordingURL,
-		)
+	resp, err := s.downloadTwilioRecording(
+		ctx,
+		recordingURL,
+	)
 	if err != nil {
 		return "", err
 	}
 
 	defer resp.Body.Close()
+
+	audio, err := io.ReadAll(
+		resp.Body,
+	)
+	if err != nil {
+		return "", fmt.Errorf(
+			"recording: read Twilio recording: %w",
+			err,
+		)
+	}
+
+	if len(audio) == 0 {
+		return "", fmt.Errorf(
+			"recording: Twilio returned an empty recording",
+		)
+	}
 
 	key := path.Join(
 		"recordings",
@@ -180,12 +190,18 @@ func (s *RecordingService) StoreTwilioRecording(
 	)
 
 	contentType := strings.TrimSpace(
-		resp.Header.Get("Content-Type"),
+		resp.Header.Get(
+			"Content-Type",
+		),
 	)
 
 	if contentType == "" {
 		contentType = "audio/mpeg"
 	}
+
+	contentLength := int64(
+		len(audio),
+	)
 
 	_, err = s.s3.PutObject(
 		ctx,
@@ -196,7 +212,10 @@ func (s *RecordingService) StoreTwilioRecording(
 			Key: aws.String(
 				key,
 			),
-			Body: resp.Body,
+			Body: bytes.NewReader(
+				audio,
+			),
+			ContentLength: &contentLength,
 			ContentType: aws.String(
 				contentType,
 			),
@@ -215,10 +234,6 @@ func (s *RecordingService) StoreTwilioRecording(
 			s.apiBaseURL,
 			callID.String(),
 		), nil
-	}
-
-	if s.publicBase != "" {
-		return s.publicBase + "/" + key, nil
 	}
 
 	return key, nil

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -306,49 +307,86 @@ func (r *CallRepo) UpdateStatusByProviderCallID(
 	status models.CallStatus,
 	duration *int,
 ) (uuid.UUID, error) {
-	var callID uuid.UUID
+	var updatedID uuid.UUID
 
 	err := r.db.Pool.QueryRow(
 		ctx,
 		`
 		UPDATE calls
 		SET
-			status = $1,
-			duration_seconds = COALESCE(
-				$2,
-				duration_seconds
-			),
+			status = $2::call_status,
+
+			dialed_at = CASE
+				WHEN $2::call_status IN (
+					'dialing'::call_status,
+					'ringing'::call_status,
+					'in_progress'::call_status,
+					'completed'::call_status,
+					'failed'::call_status,
+					'busy'::call_status,
+					'no_answer'::call_status,
+					'canceled'::call_status
+				)
+				THEN COALESCE(
+					dialed_at,
+					now()
+				)
+				ELSE dialed_at
+			END,
+
 			answered_at = CASE
-				WHEN $1 = 'in_progress'
+				WHEN $2::call_status = 'in_progress'::call_status
 				THEN COALESCE(
 					answered_at,
 					now()
 				)
 				ELSE answered_at
 			END,
+
 			ended_at = CASE
-				WHEN $1 IN (
-					'completed',
-					'failed',
-					'no_answer',
-					'busy',
-					'canceled'
+				WHEN $2::call_status IN (
+					'completed'::call_status,
+					'failed'::call_status,
+					'busy'::call_status,
+					'no_answer'::call_status,
+					'canceled'::call_status
 				)
 				THEN COALESCE(
 					ended_at,
 					now()
 				)
 				ELSE ended_at
+			END,
+
+			duration_seconds = COALESCE(
+				$3::int,
+				duration_seconds
+			),
+
+			ended_reason = CASE
+				WHEN $2::call_status IN (
+					'failed'::call_status,
+					'busy'::call_status,
+					'no_answer'::call_status,
+					'canceled'::call_status
+				)
+				THEN $2::text
+				ELSE ended_reason
 			END
-		WHERE provider_call_id = $3
+
+		WHERE provider = 'twilio'
+		  AND provider_call_id = $1
+
 		RETURNING id
 		`,
+		strings.TrimSpace(providerCallID),
 		status,
 		duration,
-		providerCallID,
-	).Scan(&callID)
+	).Scan(
+		&updatedID,
+	)
 
-	return callID, err
+	return updatedID, err
 }
 
 func (r *CallRepo) UpdateStatusByCallID(
@@ -365,49 +403,81 @@ func (r *CallRepo) UpdateStatusByCallID(
 		`
 		UPDATE calls
 		SET
-			provider_call_id = CASE
-				WHEN NULLIF($2, '') IS NOT NULL
-				THEN COALESCE(
-					provider_call_id,
-					$2
-				)
-				ELSE provider_call_id
-			END,
-			status = $3,
-			duration_seconds = COALESCE(
-				$4,
-				duration_seconds
+			provider_call_id = COALESCE(
+				NULLIF($2::text, ''),
+				provider_call_id
 			),
+
+			status = $3::call_status,
+
+			dialed_at = CASE
+				WHEN $3::call_status IN (
+					'dialing'::call_status,
+					'ringing'::call_status,
+					'in_progress'::call_status,
+					'completed'::call_status,
+					'failed'::call_status,
+					'busy'::call_status,
+					'no_answer'::call_status,
+					'canceled'::call_status
+				)
+				THEN COALESCE(
+					dialed_at,
+					now()
+				)
+				ELSE dialed_at
+			END,
+
 			answered_at = CASE
-				WHEN $3 = 'in_progress'
+				WHEN $3::call_status = 'in_progress'::call_status
 				THEN COALESCE(
 					answered_at,
 					now()
 				)
 				ELSE answered_at
 			END,
+
 			ended_at = CASE
-				WHEN $3 IN (
-					'completed',
-					'failed',
-					'no_answer',
-					'busy',
-					'canceled'
+				WHEN $3::call_status IN (
+					'completed'::call_status,
+					'failed'::call_status,
+					'busy'::call_status,
+					'no_answer'::call_status,
+					'canceled'::call_status
 				)
 				THEN COALESCE(
 					ended_at,
 					now()
 				)
 				ELSE ended_at
+			END,
+
+			duration_seconds = COALESCE(
+				$4::int,
+				duration_seconds
+			),
+
+			ended_reason = CASE
+				WHEN $3::call_status IN (
+					'failed'::call_status,
+					'busy'::call_status,
+					'no_answer'::call_status,
+					'canceled'::call_status
+				)
+				THEN $3::text
+				ELSE ended_reason
 			END
+
 		WHERE id = $1
 		RETURNING id
 		`,
 		callID,
-		providerCallID,
+		strings.TrimSpace(providerCallID),
 		status,
 		duration,
-	).Scan(&updatedID)
+	).Scan(
+		&updatedID,
+	)
 
 	return updatedID, err
 }
