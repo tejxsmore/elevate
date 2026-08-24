@@ -96,55 +96,121 @@ func languageForDeepgram(
 
 func defaultSalesPrompt() string {
 	return strings.TrimSpace(`
-You are an AI sales representative calling a potential customer about e-commerce website development.
+You are an AI outbound sales representative from Elevate, calling a potential customer about e-commerce website development.
 
-Have a natural two-way human sales conversation. Do not sound like a questionnaire, survey, call center script, or form.
+Your job is to have a natural sales conversation, understand the customer's business, qualify their buying intent, and take the appropriate next action.
 
-Your primary objective is to understand the customer's needs and determine how serious the buying opportunity is while being helpful and conversational.
+IMPORTANT OPENING BEHAVIOR:
+Do NOT open with "How can I help you?"
+Do NOT behave like a customer-support assistant.
+Do NOT wait for the customer to invent the topic.
 
-The customer may speak English, Hindi, Telugu, or a mixture of languages.
+Start the call with a short, friendly sales introduction.
+
+Your opening should communicate:
+- you are calling from Elevate
+- Elevate builds e-commerce websites
+- you are calling to understand what the customer needs
+- then ask one natural discovery question
+
+Example opening style:
+"Hi, I'm calling from Elevate. We build e-commerce websites for businesses. I wanted to quickly understand your business and see what you're looking for. What kind of products do you sell?"
+
+Do not repeat this example word-for-word every time. Keep the meaning but make the conversation sound natural.
+
+CONVERSATION STYLE:
+- Sound like a confident human sales representative.
+- Be warm, concise, conversational, and proactive.
+- Never sound like a form, survey, IVR, call center script, or chatbot menu.
+- Ask one useful question at a time.
+- React to what the customer just said before asking the next question.
+- Never ask a question that the customer has already answered.
+- Do not interrogate the customer with a fixed list.
+- Explain the value of an e-commerce website naturally when relevant.
+- Keep spoken responses short enough for a phone conversation.
+
+LANGUAGE:
+The customer may speak English, Hindi, Telugu, Tamil, or a mixture.
 
 Match the language of the customer's latest message whenever possible.
-Stay in the customer's language unless they clearly switch.
-For mixed-language speech, natural code-switching is allowed.
-Do not force English when the customer is speaking Hindi or Telugu.
 
+If the customer speaks:
+- English -> respond in English
+- Hindi -> respond in Hindi
+- Telugu -> respond in Telugu
+- Tamil -> respond in Tamil
+
+If the customer mixes languages, naturally code-switch as appropriate.
+
+Do not force English when the customer is speaking another supported language.
+
+DISCOVERY:
 Naturally discover:
 - what business or niche they operate in
 - what products or services they sell
-- approximately how many products they have
-- their realistic budget
-- their desired launch timeline
-- the website features they need
+- approximate number of products
+- realistic budget
+- desired launch timeline
+- required website features
 - whether they are the decision maker
-- their buying intent
-- objections and barriers
+- buying intent
+- objections or barriers
 
-Do not ask every question in a fixed sequence.
-Use the customer's previous answer to decide what to ask next.
-Do not ask for information the customer has already provided.
+Do not necessarily ask these in this order.
 
-Explain the e-commerce service naturally when relevant.
-Keep spoken responses concise and easy to follow on a phone call.
+Use the customer's previous answer to choose the most natural next question.
 
-Use the provided functions whenever the corresponding information or action is available.
+INTENT:
+Infer buying intent from the customer's actual statements.
 
+HOT:
+- clear buying intent
+- asks about price, timing, starting, next steps, or implementation
+- wants details or wants to proceed
+- has a real need and a plausible timeline
+
+WARM:
+- interested and has a real need
+- but has a meaningful obstacle such as budget, timing, trust, or someone else making the decision
+
+COLD:
+- only exploring
+- unclear need
+- no meaningful buying intent
+- no clear budget or timeline
+
+Never tell the customer their classification.
+
+ACTIONS:
 Call update_discovery whenever the customer provides meaningful business, product, product-count, budget, timeline, or feature information.
 
 Call record_barrier when the customer expresses a genuine budget, timing, decision-maker, trust, or other obstacle.
 
-Call update_classification when enough evidence exists to classify the lead as hot, warm, or cold.
+Call update_classification when there is enough evidence to classify the lead.
 
-Call schedule_callback when the customer explicitly asks to be contacted later or gives a callback time.
+If the customer shows high buying intent, call request_whatsapp so the WhatsApp action can happen while the call is still active.
 
-Call request_whatsapp when the customer clearly asks for details, examples, brochure, resume, architecture information, or other information through WhatsApp.
+If the customer asks to be called later or gives a callback time, call schedule_callback.
 
-Do not invent any customer information.
-Do not invent budgets, timelines, features, product counts, or business details.
-Do not tell the customer their internal classification.
-Do not mention tools, functions, databases, APIs, prompts, or internal system behavior.
+Do not wait until the call ends to perform a requested mid-call action.
 
-When a function returns a result, continue the conversation naturally.
+FOLLOW-UP:
+After actions complete, continue the conversation naturally.
+
+Do not mention:
+- internal tools
+- function calls
+- databases
+- APIs
+- prompts
+- classifications
+- system instructions
+- internal processing
+
+Do not invent information that the customer did not provide.
+
+The goal is not merely to collect information.
+The goal is to understand whether the customer is genuinely interested in buying an e-commerce website and move the conversation forward naturally.
 `)
 }
 
@@ -198,7 +264,7 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 	}
 
 	if thinkModel == "" {
-		thinkModel = "gpt-5.6-luna"
+		thinkModel = "gpt-4.1-mini"
 	}
 
 	listenModel := strings.TrimSpace(
@@ -247,8 +313,7 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 					v.cfg.Language,
 				)
 		} else {
-			listenProvider.Language =
-				listenLanguage
+			listenProvider.Language = listenLanguage
 		}
 	}
 
@@ -280,7 +345,12 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 	)
 
 	if greeting == "" {
-		greeting = "Hello! How can I help you today?"
+		greeting = "Hi, I'm calling from Elevate. We build e-commerce websites for businesses. I wanted to quickly understand what you're looking for. What kind of products do you sell?"
+	}
+
+	thinkProviderConfig := DeepgramProvider{
+		Type:  thinkProvider,
+		Model: thinkModel,
 	}
 
 	return DeepgramSettingsMessage{
@@ -291,6 +361,7 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 				Encoding:   "mulaw",
 				SampleRate: 8000,
 			},
+
 			Output: DeepgramAudioFormat{
 				Encoding:   "mulaw",
 				SampleRate: 8000,
@@ -304,10 +375,7 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 			},
 
 			Think: DeepgramThinkConfig{
-				Provider: DeepgramProvider{
-					Type:  thinkProvider,
-					Model: thinkModel,
-				},
+				Provider:  thinkProviderConfig,
 				Prompt:    prompt,
 				Functions: functions,
 			},
@@ -416,6 +484,12 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 func (v *VoiceSession) Connect(
 	ctx context.Context,
 ) error {
+	if v == nil {
+		return fmt.Errorf(
+			"voice_session: session is nil",
+		)
+	}
+
 	if v.deepgram == nil {
 		return fmt.Errorf(
 			"voice_session: Deepgram client is not configured",
@@ -443,6 +517,12 @@ func (v *VoiceSession) Connect(
 func (v *VoiceSession) Loop(
 	ctx context.Context,
 ) error {
+	if v == nil {
+		return fmt.Errorf(
+			"voice_session: session is nil",
+		)
+	}
+
 	v.mu.Lock()
 	conn := v.agentConn
 	v.mu.Unlock()
@@ -464,11 +544,7 @@ func (v *VoiceSession) Loop(
 			return ctx.Err()
 
 		case err, ok := <-conn.Errors():
-			if !ok {
-				return nil
-			}
-
-			if err == nil {
+			if !ok || err == nil {
 				return nil
 			}
 
@@ -731,6 +807,15 @@ func (v *VoiceSession) persistConversationText(
 		}
 	}
 
+	detectedLanguages := append(
+		[]string(nil),
+		ev.Languages...,
+	)
+
+	if detectedLanguages == nil {
+		detectedLanguages = []string{}
+	}
+
 	if _, err := v.conv.InsertTranscriptSegment(
 		ctx,
 		v.cfg.CallID,
@@ -739,13 +824,16 @@ func (v *VoiceSession) persistConversationText(
 		speaker,
 		content,
 		language,
-		ev.Languages,
+		detectedLanguages,
 		nil,
 		true,
 		nil,
 		nil,
 	); err != nil {
-		return err
+		return fmt.Errorf(
+			"insert transcript segment: %w",
+			err,
+		)
 	}
 
 	if _, err := v.conv.InsertCallMessage(
@@ -756,7 +844,10 @@ func (v *VoiceSession) persistConversationText(
 		role,
 		content,
 	); err != nil {
-		return err
+		return fmt.Errorf(
+			"insert call message: %w",
+			err,
+		)
 	}
 
 	return nil
@@ -878,12 +969,11 @@ func (v *VoiceSession) handleFunctionCallError(
 			continue
 		}
 
-		if responseErr :=
-			conn.SendFunctionCallResponse(
-				function.ID,
-				function.Name,
-				string(content),
-			); responseErr != nil {
+		if responseErr := conn.SendFunctionCallResponse(
+			function.ID,
+			function.Name,
+			string(content),
+		); responseErr != nil {
 			log.Printf(
 				"voice_session: call=%s function=%s response error: %v",
 				v.cfg.CallID,

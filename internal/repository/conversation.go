@@ -54,7 +54,9 @@ func (r *ConversationRepo) StartTurn(
 		`,
 		callID,
 		sequenceNumber,
-	).Scan(&turnID)
+	).Scan(
+		&turnID,
+	)
 
 	return turnID, err
 }
@@ -94,6 +96,14 @@ func (r *ConversationRepo) InsertTranscriptSegment(
 	startedMs *int,
 	endedMs *int,
 ) (uuid.UUID, error) {
+	if detectedLanguages == nil {
+		detectedLanguages = []string{}
+	}
+
+	if text == "" {
+		return uuid.Nil, nil
+	}
+
 	var id uuid.UUID
 
 	err := r.db.Pool.QueryRow(
@@ -151,7 +161,9 @@ func (r *ConversationRepo) InsertTranscriptSegment(
 		isFinal,
 		startedMs,
 		endedMs,
-	).Scan(&id)
+	).Scan(
+		&id,
+	)
 
 	return id, err
 }
@@ -195,7 +207,9 @@ func (r *ConversationRepo) InsertCallMessage(
 		sequenceNumber,
 		role,
 		content,
-	).Scan(&id)
+	).Scan(
+		&id,
+	)
 
 	return id, err
 }
@@ -343,7 +357,10 @@ func (r *ConversationRepo) MarkCallInProgress(
 					'ringing',
 					'in_progress'
 				)
-				THEN COALESCE(answered_at, now())
+				THEN COALESCE(
+					answered_at,
+					now()
+				)
 				ELSE answered_at
 			END,
 			twiml_stream_sid = COALESCE(
@@ -383,7 +400,10 @@ func (r *ConversationRepo) MarkCallEnded(
 					'no_answer',
 					'canceled'
 				)
-				THEN COALESCE(ended_at, now())
+				THEN COALESCE(
+					ended_at,
+					now()
+				)
 				ELSE ended_at
 			END
 		WHERE id = $1

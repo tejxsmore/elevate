@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -121,19 +122,18 @@ func (h *RecordingHandler) TwilioRecording(
 	}
 
 	if !h.recordings.Enabled() {
-		jsonError(
-			c,
-			http.StatusServiceUnavailable,
-			"recording storage is not configured",
+		log.Printf(
+			"twilio_recording: storage disabled call_id=%s sid=%s",
+			callID,
+			recordingSID,
+		)
+
+		c.Status(
+			http.StatusNoContent,
 		)
 		return
 	}
 
-	/*
-		Make the recording operation naturally idempotent.
-		If Twilio retries the exact callback, UpdateRecording
-		will simply store the same values again.
-	*/
 	storedURL, err :=
 		h.recordings.StoreTwilioRecording(
 			c.Request.Context(),
@@ -142,6 +142,14 @@ func (h *RecordingHandler) TwilioRecording(
 			recordingURL,
 		)
 	if err != nil {
+		log.Printf(
+			"twilio_recording: store failed call_id=%s sid=%s url=%s: %v",
+			callID,
+			recordingSID,
+			recordingURL,
+			err,
+		)
+
 		jsonError(
 			c,
 			http.StatusBadGateway,
@@ -156,6 +164,13 @@ func (h *RecordingHandler) TwilioRecording(
 		recordingSID,
 		storedURL,
 	); err != nil {
+		log.Printf(
+			"twilio_recording: database update failed call_id=%s sid=%s: %v",
+			callID,
+			recordingSID,
+			err,
+		)
+
 		jsonError(
 			c,
 			http.StatusInternalServerError,

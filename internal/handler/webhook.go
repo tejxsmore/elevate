@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -58,46 +59,10 @@ func (h *WebhookHandler) TwilioVoice(
 		relatedCallID,
 	)
 	if err != nil {
-		jsonError(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-		)
-		return
-	}
-
-	if !ingest.ShouldRun {
-		twiml, twimlErr := h.callService.HandleVoiceWebhook(
-			c.Request.Context(),
+		log.Printf(
+			"twilio_voice: ingest failed call_id=%s call_sid=%s: %v",
 			callID,
 			callSID,
-		)
-		if twimlErr != nil {
-			jsonError(
-				c,
-				http.StatusInternalServerError,
-				twimlErr.Error(),
-			)
-			return
-		}
-
-		c.Data(
-			http.StatusOK,
-			"text/xml; charset=utf-8",
-			[]byte(twiml),
-		)
-		return
-	}
-
-	twiml, err := h.callService.HandleVoiceWebhook(
-		c.Request.Context(),
-		callID,
-		callSID,
-	)
-	if err != nil {
-		_ = h.webhookService.Failed(
-			c.Request.Context(),
-			ingest.EventID,
 			err,
 		)
 
@@ -109,16 +74,54 @@ func (h *WebhookHandler) TwilioVoice(
 		return
 	}
 
-	if err := h.webhookService.Processed(
+	twiml, err := h.callService.HandleVoiceWebhook(
 		c.Request.Context(),
-		ingest.EventID,
-	); err != nil {
+		callID,
+		callSID,
+	)
+	if err != nil {
+		if ingest.ShouldRun {
+			_ = h.webhookService.Failed(
+				c.Request.Context(),
+				ingest.EventID,
+				err,
+			)
+		}
+
+		log.Printf(
+			"twilio_voice: call_id=%s call_sid=%s: %v",
+			callID,
+			callSID,
+			err,
+		)
+
 		jsonError(
 			c,
 			http.StatusInternalServerError,
 			err.Error(),
 		)
 		return
+	}
+
+	if ingest.ShouldRun {
+		if err := h.webhookService.Processed(
+			c.Request.Context(),
+			ingest.EventID,
+		); err != nil {
+			log.Printf(
+				"twilio_voice: mark processed call_id=%s event=%s: %v",
+				callID,
+				ingest.EventID,
+				err,
+			)
+
+			jsonError(
+				c,
+				http.StatusInternalServerError,
+				err.Error(),
+			)
+			return
+		}
 	}
 
 	c.Data(
@@ -178,6 +181,14 @@ func (h *WebhookHandler) TwilioStatus(
 		relatedCallID,
 	)
 	if err != nil {
+		log.Printf(
+			"twilio_status: ingest failed call_id=%s call_sid=%s status=%s: %v",
+			callID,
+			callSID,
+			callStatus,
+			err,
+		)
+
 		jsonError(
 			c,
 			http.StatusInternalServerError,
@@ -193,16 +204,26 @@ func (h *WebhookHandler) TwilioStatus(
 		return
 	}
 
-	if err := h.callService.HandleStatusWebhook(
+	err = h.callService.HandleStatusWebhook(
 		c.Request.Context(),
 		callID,
 		callSID,
 		callStatus,
 		duration,
-	); err != nil {
+	)
+	if err != nil {
 		_ = h.webhookService.Failed(
 			c.Request.Context(),
 			ingest.EventID,
+			err,
+		)
+
+		log.Printf(
+			"twilio_status: call_id=%s call_sid=%s status=%s duration=%s: %v",
+			callID,
+			callSID,
+			callStatus,
+			durationText,
 			err,
 		)
 
@@ -218,6 +239,13 @@ func (h *WebhookHandler) TwilioStatus(
 		c.Request.Context(),
 		ingest.EventID,
 	); err != nil {
+		log.Printf(
+			"twilio_status: mark processed call_id=%s event=%s: %v",
+			callID,
+			ingest.EventID,
+			err,
+		)
+
 		jsonError(
 			c,
 			http.StatusInternalServerError,
@@ -332,6 +360,13 @@ func (h *WebhookHandler) TwilioWhatsappStatus(
 		_ = h.webhookService.Failed(
 			c.Request.Context(),
 			ingest.EventID,
+			err,
+		)
+
+		log.Printf(
+			"twilio_whatsapp_status: sid=%s status=%s: %v",
+			messageSID,
+			messageStatus,
 			err,
 		)
 
