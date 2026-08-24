@@ -68,6 +68,7 @@ func normalizeRequestedLanguage(
 		models.LanguageTelugu,
 		models.LanguageMixed,
 		models.LanguageUnknown:
+
 		return models.LanguageCode(value), nil
 
 	default:
@@ -82,13 +83,52 @@ func (s *CallService) TriggerCall(
 	ctx context.Context,
 	in TriggerCallInput,
 ) (models.Call, error) {
+	if s == nil {
+		return models.Call{}, fmt.Errorf(
+			"call service is not configured",
+		)
+	}
+
+	if s.cfg == nil {
+		return models.Call{}, fmt.Errorf(
+			"call service configuration is missing",
+		)
+	}
+
+	if s.calls == nil {
+		return models.Call{}, fmt.Errorf(
+			"call repository is not configured",
+		)
+	}
+
+	if s.leads == nil {
+		return models.Call{}, fmt.Errorf(
+			"lead repository is not configured",
+		)
+	}
+
+	if s.campaigns == nil {
+		return models.Call{}, fmt.Errorf(
+			"campaign repository is not configured",
+		)
+	}
+
+	if s.twilio == nil {
+		return models.Call{}, fmt.Errorf(
+			"Twilio client is not configured",
+		)
+	}
+
 	lang := models.LanguageUnknown
 
 	if in.PreferredLanguage != nil &&
-		strings.TrimSpace(*in.PreferredLanguage) != "" {
+		strings.TrimSpace(
+			*in.PreferredLanguage,
+		) != "" {
 		normalized, err := normalizeRequestedLanguage(
 			*in.PreferredLanguage,
 		)
+
 		if err != nil {
 			return models.Call{}, err
 		}
@@ -130,7 +170,10 @@ func (s *CallService) TriggerCall(
 		ctx,
 		*campaignID,
 	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(
+			err,
+			pgx.ErrNoRows,
+		) {
 			return models.Call{}, fmt.Errorf(
 				"campaign %s is not active",
 				campaignID.String(),
@@ -160,14 +203,14 @@ func (s *CallService) TriggerCall(
 		"/",
 	)
 
-	voiceURL := fmt.Sprintf(
-		"%s/webhooks/twilio/voice?call_id=%s",
+	statusURL := fmt.Sprintf(
+		"%s/webhooks/twilio/status?call_id=%s",
 		baseURL,
 		call.ID,
 	)
 
-	statusURL := fmt.Sprintf(
-		"%s/webhooks/twilio/status?call_id=%s",
+	voiceURL := fmt.Sprintf(
+		"%s/webhooks/twilio/voice?call_id=%s",
 		baseURL,
 		call.ID,
 	)
@@ -178,18 +221,38 @@ func (s *CallService) TriggerCall(
 		call.ID,
 	)
 
+	params := TwilioCallParams{
+		To:                in.PhoneE164,
+		From:              s.cfg.Twilio.VoiceNumber,
+		StatusCallbackURL: statusURL,
+		StatusCallbackEvents: []string{
+			"initiated",
+			"ringing",
+			"answered",
+			"completed",
+		},
+	}
+
+	if s.cfg.Twilio.TrialMode {
+		params.VoiceURL =
+			s.cfg.Twilio.TrialVoiceURL
+	} else {
+		params.VoiceURL = voiceURL
+
+		if s.cfg.Twilio.RecordingEnabled {
+			params.RecordingStatusCallbackURL =
+				recordingURL
+
+			params.RecordingStatusCallbackEvents =
+				[]string{
+					"completed",
+				}
+		}
+	}
+
 	sid, err := s.twilio.PlaceCall(
 		ctx,
-		TwilioCallParams{
-			To:                         in.PhoneE164,
-			From:                       s.cfg.Twilio.VoiceNumber,
-			VoiceURL:                   voiceURL,
-			StatusCallbackURL:          statusURL,
-			RecordingStatusCallbackURL: recordingURL,
-			RecordingStatusCallbackEvents: []string{
-				"completed",
-			},
-		},
+		params,
 	)
 	if err != nil {
 		_ = s.calls.MarkFailed(
@@ -225,6 +288,24 @@ func (s *CallService) PlaceExistingCall(
 	ctx context.Context,
 	call models.Call,
 ) (models.Call, error) {
+	if s == nil {
+		return models.Call{}, fmt.Errorf(
+			"call service is not configured",
+		)
+	}
+
+	if s.cfg == nil {
+		return models.Call{}, fmt.Errorf(
+			"call service configuration is missing",
+		)
+	}
+
+	if s.twilio == nil {
+		return models.Call{}, fmt.Errorf(
+			"Twilio client is not configured",
+		)
+	}
+
 	if call.ID == uuid.Nil {
 		return models.Call{}, fmt.Errorf(
 			"call ID is empty",
@@ -232,7 +313,9 @@ func (s *CallService) PlaceExistingCall(
 	}
 
 	if call.ProviderCallID != nil &&
-		strings.TrimSpace(*call.ProviderCallID) != "" {
+		strings.TrimSpace(
+			*call.ProviderCallID,
+		) != "" {
 		return call, nil
 	}
 
@@ -252,14 +335,14 @@ func (s *CallService) PlaceExistingCall(
 		"/",
 	)
 
-	voiceURL := fmt.Sprintf(
-		"%s/webhooks/twilio/voice?call_id=%s",
+	statusURL := fmt.Sprintf(
+		"%s/webhooks/twilio/status?call_id=%s",
 		baseURL,
 		call.ID,
 	)
 
-	statusURL := fmt.Sprintf(
-		"%s/webhooks/twilio/status?call_id=%s",
+	voiceURL := fmt.Sprintf(
+		"%s/webhooks/twilio/voice?call_id=%s",
 		baseURL,
 		call.ID,
 	)
@@ -270,16 +353,38 @@ func (s *CallService) PlaceExistingCall(
 		call.ID,
 	)
 
+	params := TwilioCallParams{
+		To:                lead.PhoneE164,
+		From:              s.cfg.Twilio.VoiceNumber,
+		StatusCallbackURL: statusURL,
+		StatusCallbackEvents: []string{
+			"initiated",
+			"ringing",
+			"answered",
+			"completed",
+		},
+	}
+
+	if s.cfg.Twilio.TrialMode {
+		params.VoiceURL =
+			s.cfg.Twilio.TrialVoiceURL
+	} else {
+		params.VoiceURL = voiceURL
+
+		if s.cfg.Twilio.RecordingEnabled {
+			params.RecordingStatusCallbackURL =
+				recordingURL
+
+			params.RecordingStatusCallbackEvents =
+				[]string{
+					"completed",
+				}
+		}
+	}
+
 	providerCallID, err := s.twilio.PlaceCall(
 		ctx,
-		TwilioCallParams{
-			To:                            lead.PhoneE164,
-			From:                          s.cfg.Twilio.VoiceNumber,
-			VoiceURL:                      voiceURL,
-			StatusCallbackURL:             statusURL,
-			RecordingStatusCallbackURL:    recordingURL,
-			RecordingStatusCallbackEvents: []string{"completed"},
-		},
+		params,
 	)
 	if err != nil {
 		_ = s.calls.MarkFailed(
@@ -316,64 +421,79 @@ func (s *CallService) HandleVoiceWebhook(
 	callIDStr string,
 	callSid string,
 ) (string, error) {
-	callIDStr = strings.TrimSpace(callIDStr)
-	callSid = strings.TrimSpace(callSid)
+	callIDStr = strings.TrimSpace(
+		callIDStr,
+	)
+
+	callSid = strings.TrimSpace(
+		callSid,
+	)
 
 	if callIDStr == "" {
-		return "", fmt.Errorf(
-			"missing call_id",
-		)
+		return "",
+			fmt.Errorf(
+				"missing call_id",
+			)
 	}
 
 	callID, err := uuid.Parse(
 		callIDStr,
 	)
 	if err != nil {
-		return "", fmt.Errorf(
-			"invalid call_id: %w",
-			err,
-		)
+		return "",
+			fmt.Errorf(
+				"invalid call_id: %w",
+				err,
+			)
 	}
 
 	if strings.TrimSpace(
 		s.cfg.Twilio.MediaStreamURL,
 	) == "" {
-		return "", fmt.Errorf(
-			"TWILIO_MEDIA_STREAM_URL is empty",
-		)
+		return "",
+			fmt.Errorf(
+				"TWILIO_MEDIA_STREAM_URL is empty",
+			)
 	}
 
 	streamURL, err := url.Parse(
 		s.cfg.Twilio.MediaStreamURL,
 	)
 	if err != nil {
-		return "", fmt.Errorf(
-			"invalid media stream URL: %w",
-			err,
-		)
+		return "",
+			fmt.Errorf(
+				"invalid media stream URL: %w",
+				err,
+			)
 	}
 
 	if streamURL.Scheme != "wss" ||
 		streamURL.Host == "" {
-		return "", fmt.Errorf(
-			"TWILIO_MEDIA_STREAM_URL must be a valid wss URL",
-		)
+		return "",
+			fmt.Errorf(
+				"TWILIO_MEDIA_STREAM_URL must be a valid wss URL",
+			)
 	}
 
 	if _, err := s.calls.Get(
 		ctx,
 		callID,
 	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", fmt.Errorf(
-				"call not found",
-			)
+		if errors.Is(
+			err,
+			pgx.ErrNoRows,
+		) {
+			return "",
+				fmt.Errorf(
+					"call not found",
+				)
 		}
 
-		return "", fmt.Errorf(
-			"load call: %w",
-			err,
-		)
+		return "",
+			fmt.Errorf(
+				"load call: %w",
+				err,
+			)
 	}
 
 	if callSid != "" {
@@ -382,10 +502,11 @@ func (s *CallService) HandleVoiceWebhook(
 			callID,
 			callSid,
 		); err != nil {
-			return "", fmt.Errorf(
-				"record provider call ID: %w",
-				err,
-			)
+			return "",
+				fmt.Errorf(
+					"record provider call ID: %w",
+					err,
+				)
 		}
 	}
 
@@ -414,22 +535,31 @@ func mapTwilioCallStatus(
 	) {
 	case "queued":
 		return models.CallStatusQueued
+
 	case "initiated":
 		return models.CallStatusDialing
+
 	case "ringing":
 		return models.CallStatusRinging
+
 	case "in-progress":
 		return models.CallStatusInProgress
+
 	case "completed":
 		return models.CallStatusCompleted
+
 	case "busy":
 		return models.CallStatusBusy
+
 	case "no-answer":
 		return models.CallStatusNoAnswer
+
 	case "canceled":
 		return models.CallStatusCanceled
+
 	case "failed":
 		return models.CallStatusFailed
+
 	default:
 		return models.CallStatusFailed
 	}
@@ -442,11 +572,20 @@ func (s *CallService) HandleStatusWebhook(
 	callStatus string,
 	duration *int,
 ) error {
-	callIDStr = strings.TrimSpace(callIDStr)
-	callSid = strings.TrimSpace(callSid)
-	callStatus = strings.TrimSpace(callStatus)
+	callIDStr = strings.TrimSpace(
+		callIDStr,
+	)
 
-	if callSid == "" && callIDStr == "" {
+	callSid = strings.TrimSpace(
+		callSid,
+	)
+
+	callStatus = strings.TrimSpace(
+		callStatus,
+	)
+
+	if callSid == "" &&
+		callIDStr == "" {
 		return fmt.Errorf(
 			"missing CallSid and call_id",
 		)
@@ -462,7 +601,9 @@ func (s *CallService) HandleStatusWebhook(
 	)
 
 	if callIDStr != "" {
-		callID, err = uuid.Parse(callIDStr)
+		callID, err = uuid.Parse(
+			callIDStr,
+		)
 		if err != nil {
 			return fmt.Errorf(
 				"invalid call_id: %w",

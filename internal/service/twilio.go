@@ -100,26 +100,42 @@ func (c *TwilioClient) PlaceCall(
 		)
 	}
 
-	if strings.TrimSpace(c.AccountSID) == "" ||
-		strings.TrimSpace(c.AuthToken) == "" {
+	if strings.TrimSpace(
+		c.AccountSID,
+	) == "" ||
+		strings.TrimSpace(
+			c.AuthToken,
+		) == "" {
 		return "", fmt.Errorf(
 			"twilio: missing credentials",
 		)
 	}
 
-	if strings.TrimSpace(p.To) == "" {
+	to := strings.TrimSpace(
+		p.To,
+	)
+
+	from := strings.TrimSpace(
+		p.From,
+	)
+
+	voiceURL := strings.TrimSpace(
+		p.VoiceURL,
+	)
+
+	if to == "" {
 		return "", fmt.Errorf(
 			"twilio: missing destination number",
 		)
 	}
 
-	if strings.TrimSpace(p.From) == "" {
+	if from == "" {
 		return "", fmt.Errorf(
 			"twilio: missing source number",
 		)
 	}
 
-	if strings.TrimSpace(p.VoiceURL) == "" {
+	if voiceURL == "" {
 		return "", fmt.Errorf(
 			"twilio: missing voice URL",
 		)
@@ -134,25 +150,25 @@ func (c *TwilioClient) PlaceCall(
 
 	form.Set(
 		"To",
-		strings.TrimSpace(p.To),
+		to,
 	)
 
 	form.Set(
 		"From",
-		strings.TrimSpace(p.From),
+		from,
 	)
 
 	form.Set(
 		"Url",
-		strings.TrimSpace(p.VoiceURL),
+		voiceURL,
 	)
 
-	if value := strings.TrimSpace(
+	if statusURL := strings.TrimSpace(
 		p.StatusCallbackURL,
-	); value != "" {
+	); statusURL != "" {
 		form.Set(
 			"StatusCallback",
-			value,
+			statusURL,
 		)
 
 		form.Set(
@@ -188,9 +204,9 @@ func (c *TwilioClient) PlaceCall(
 		}
 	}
 
-	if value := strings.TrimSpace(
+	if recordingURL := strings.TrimSpace(
 		p.RecordingStatusCallbackURL,
-	); value != "" {
+	); recordingURL != "" {
 		form.Set(
 			"Record",
 			"true",
@@ -198,7 +214,7 @@ func (c *TwilioClient) PlaceCall(
 
 		form.Set(
 			"RecordingStatusCallback",
-			value,
+			recordingURL,
 		)
 
 		form.Set(
@@ -346,14 +362,20 @@ func (c *TwilioClient) SendWhatsApp(
 		)
 	}
 
-	if strings.TrimSpace(c.AccountSID) == "" ||
-		strings.TrimSpace(c.AuthToken) == "" {
+	if strings.TrimSpace(
+		c.AccountSID,
+	) == "" ||
+		strings.TrimSpace(
+			c.AuthToken,
+		) == "" {
 		return "", fmt.Errorf(
 			"twilio: missing credentials",
 		)
 	}
 
-	if strings.TrimSpace(c.WhatsAppNumber) == "" {
+	if strings.TrimSpace(
+		c.WhatsAppNumber,
+	) == "" {
 		return "", fmt.Errorf(
 			"twilio: WhatsApp number is not configured",
 		)

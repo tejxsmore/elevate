@@ -73,6 +73,10 @@ type TwilioConfig struct {
 	StatusCallbackURL         string
 	WhatsAppStatusCallbackURL string
 	MediaStreamURL            string
+
+	TrialMode        bool
+	RecordingEnabled bool
+	TrialVoiceURL    string
 }
 
 type SupabaseConfig struct {
@@ -323,6 +327,21 @@ func Load() (*Config, error) {
 				),
 				"/",
 			),
+
+			TrialMode: getEnvBool(
+				"TWILIO_TRIAL_MODE",
+				false,
+			),
+
+			RecordingEnabled: getEnvBool(
+				"TWILIO_RECORDING_ENABLED",
+				true,
+			),
+
+			TrialVoiceURL: getEnv(
+				"TWILIO_TRIAL_VOICE_URL",
+				"https://webhooks.twilio.com/v1/Voice/Template/voice_speech_recognition",
+			),
 		},
 
 		Supabase: SupabaseConfig{
@@ -436,6 +455,15 @@ func (c *Config) validate() error {
 		)
 	}
 
+	if c.Twilio.TrialMode &&
+		strings.TrimSpace(
+			c.Twilio.TrialVoiceURL,
+		) == "" {
+		return fmt.Errorf(
+			"TWILIO_TRIAL_VOICE_URL cannot be empty when TWILIO_TRIAL_MODE=true",
+		)
+	}
+
 	if c.Env == "production" {
 		var missingProd []string
 
@@ -474,7 +502,14 @@ func (c *Config) validate() error {
 			)
 		}
 
-		if c.Twilio.MediaStreamURL == "" {
+		if c.Twilio.TrialMode {
+			if c.Twilio.TrialVoiceURL == "" {
+				missingProd = append(
+					missingProd,
+					"TWILIO_TRIAL_VOICE_URL",
+				)
+			}
+		} else if c.Twilio.MediaStreamURL == "" {
 			missingProd = append(
 				missingProd,
 				"TWILIO_MEDIA_STREAM_URL",
@@ -503,7 +538,6 @@ func (c *Config) validate() error {
 		c.App.APIBaseURL,
 		"API_BASE_URL",
 	)
-
 }
 
 func validateURL(
@@ -566,13 +600,17 @@ func getEnv(
 	key string,
 	fallback string,
 ) string {
-	value, ok := os.LookupEnv(key)
+	value, ok := os.LookupEnv(
+		key,
+	)
 
 	if !ok {
 		return fallback
 	}
 
-	value = strings.TrimSpace(value)
+	value = strings.TrimSpace(
+		value,
+	)
 
 	if value == "" {
 		return fallback
@@ -585,7 +623,9 @@ func getEnvList(
 	key string,
 	fallback []string,
 ) []string {
-	value, ok := os.LookupEnv(key)
+	value, ok := os.LookupEnv(
+		key,
+	)
 
 	if !ok ||
 		strings.TrimSpace(value) == "" {
@@ -604,7 +644,9 @@ func getEnvList(
 	)
 
 	for _, part := range parts {
-		part = strings.TrimSpace(part)
+		part = strings.TrimSpace(
+			part,
+		)
 
 		if part != "" {
 			result = append(
@@ -625,14 +667,18 @@ func getEnvInt(
 	key string,
 	fallback int,
 ) int {
-	value, ok := os.LookupEnv(key)
+	value, ok := os.LookupEnv(
+		key,
+	)
 
 	if !ok ||
 		strings.TrimSpace(value) == "" {
 		return fallback
 	}
 
-	parsed, err := strconv.Atoi(value)
+	parsed, err := strconv.Atoi(
+		strings.TrimSpace(value),
+	)
 
 	if err != nil {
 		return fallback
@@ -645,7 +691,9 @@ func getEnvFloat(
 	key string,
 	fallback float64,
 ) float64 {
-	value, ok := os.LookupEnv(key)
+	value, ok := os.LookupEnv(
+		key,
+	)
 
 	if !ok ||
 		strings.TrimSpace(value) == "" {
@@ -653,7 +701,7 @@ func getEnvFloat(
 	}
 
 	parsed, err := strconv.ParseFloat(
-		value,
+		strings.TrimSpace(value),
 		64,
 	)
 
@@ -668,7 +716,9 @@ func getEnvDuration(
 	key string,
 	fallback time.Duration,
 ) time.Duration {
-	value, ok := os.LookupEnv(key)
+	value, ok := os.LookupEnv(
+		key,
+	)
 
 	if !ok ||
 		strings.TrimSpace(value) == "" {
@@ -676,7 +726,31 @@ func getEnvDuration(
 	}
 
 	parsed, err := time.ParseDuration(
-		value,
+		strings.TrimSpace(value),
+	)
+
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func getEnvBool(
+	key string,
+	fallback bool,
+) bool {
+	value, ok := os.LookupEnv(
+		key,
+	)
+
+	if !ok ||
+		strings.TrimSpace(value) == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(
+		strings.TrimSpace(value),
 	)
 
 	if err != nil {
