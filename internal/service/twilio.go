@@ -36,9 +36,15 @@ func NewTwilioClient(
 	}
 
 	return &TwilioClient{
-		AccountSID:                strings.TrimSpace(accountSID),
-		AuthToken:                 strings.TrimSpace(authToken),
-		WhatsAppNumber:            strings.TrimSpace(whatsAppNumber),
+		AccountSID: strings.TrimSpace(
+			accountSID,
+		),
+		AuthToken: strings.TrimSpace(
+			authToken,
+		),
+		WhatsAppNumber: strings.TrimSpace(
+			whatsAppNumber,
+		),
 		WhatsAppStatusCallbackURL: statusURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -69,7 +75,6 @@ type TwilioCallParams struct {
 
 type twilioCallResponse struct {
 	SID      string `json:"sid"`
-	Status   string `json:"status"`
 	Code     int    `json:"code"`
 	Message  string `json:"message"`
 	MoreInfo string `json:"more_info"`
@@ -226,15 +231,14 @@ func (c *TwilioClient) PlaceCall(
 		}
 	}
 
-	req, err :=
-		http.NewRequestWithContext(
-			ctx,
-			http.MethodPost,
-			endpoint,
-			strings.NewReader(
-				form.Encode(),
-			),
-		)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		strings.NewReader(
+			form.Encode(),
+		),
+	)
 	if err != nil {
 		return "", fmt.Errorf(
 			"twilio: build call request: %w",
@@ -252,7 +256,9 @@ func (c *TwilioClient) PlaceCall(
 		"application/x-www-form-urlencoded",
 	)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(
+		req,
+	)
 	if err != nil {
 		return "", fmt.Errorf(
 			"twilio: call request failed: %w",
@@ -288,9 +294,13 @@ func (c *TwilioClient) PlaceCall(
 		return "", fmt.Errorf(
 			"twilio: %d %s (code %d, more info: %s)",
 			resp.StatusCode,
-			strings.TrimSpace(out.Message),
+			strings.TrimSpace(
+				out.Message,
+			),
 			out.Code,
-			strings.TrimSpace(out.MoreInfo),
+			strings.TrimSpace(
+				out.MoreInfo,
+			),
 		)
 	}
 
@@ -381,9 +391,7 @@ func (c *TwilioClient) SendWhatsApp(
 		),
 	)
 
-	if strings.TrimSpace(
-		body,
-	) != "" {
+	if strings.TrimSpace(body) != "" {
 		form.Set(
 			"Body",
 			body,
@@ -426,15 +434,14 @@ func (c *TwilioClient) SendWhatsApp(
 		)
 	}
 
-	req, err :=
-		http.NewRequestWithContext(
-			ctx,
-			http.MethodPost,
-			endpoint,
-			strings.NewReader(
-				form.Encode(),
-			),
-		)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		strings.NewReader(
+			form.Encode(),
+		),
+	)
 	if err != nil {
 		return "", fmt.Errorf(
 			"twilio: build WhatsApp request: %w",
@@ -452,7 +459,9 @@ func (c *TwilioClient) SendWhatsApp(
 		"application/x-www-form-urlencoded",
 	)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(
+		req,
+	)
 	if err != nil {
 		return "", fmt.Errorf(
 			"twilio: WhatsApp request failed: %w",
@@ -498,9 +507,13 @@ func (c *TwilioClient) SendWhatsApp(
 		return "", fmt.Errorf(
 			"twilio: WhatsApp %d %s (code %d, more info: %s)",
 			resp.StatusCode,
-			strings.TrimSpace(out.Message),
+			strings.TrimSpace(
+				out.Message,
+			),
 			out.Code,
-			strings.TrimSpace(out.MoreInfo),
+			strings.TrimSpace(
+				out.MoreInfo,
+			),
 		)
 	}
 
