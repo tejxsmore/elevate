@@ -262,6 +262,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				&writeMu,
 				streamSid,
 				session,
+				service.NewPCMDownsampler(),
 				clearOutbound,
 				done,
 			)
@@ -350,13 +351,15 @@ func pumpOutboundAudio(
 	writeMu *sync.Mutex,
 	streamSid string,
 	session *service.VoiceSession,
+	downsampler *service.PCMDownsampler,
 	clearOutbound <-chan struct{},
 	done <-chan struct{},
 ) {
 	const (
 		frameSize     = 160
 		frameDuration = 20 * time.Millisecond
-		startupBytes  = frameSize * 5
+		startupFrames = 5
+		startupBytes  = frameSize * startupFrames
 	)
 
 	audioInput := make(
@@ -420,9 +423,11 @@ func pumpOutboundAudio(
 		}
 
 		writeMu.Lock()
+
 		err := conn.WriteJSON(
 			message,
 		)
+
 		writeMu.Unlock()
 
 		return err
@@ -441,6 +446,11 @@ func pumpOutboundAudio(
 		case <-clearOutbound:
 			pending = pending[:0]
 			started = false
+			inputClosed = false
+
+			if downsampler != nil {
+				downsampler.Reset()
+			}
 
 		drainAudio:
 			for {
@@ -462,9 +472,22 @@ func pumpOutboundAudio(
 				continue
 			}
 
+			if downsampler == nil {
+				continue
+			}
+
+			mulawAudio :=
+				downsampler.Push(
+					audio,
+				)
+
+			if len(mulawAudio) == 0 {
+				continue
+			}
+
 			pending = append(
 				pending,
-				audio...,
+				mulawAudio...,
 			)
 
 			if !started &&
@@ -483,14 +506,40 @@ func pumpOutboundAudio(
 			}
 
 			if len(pending) < frameSize {
-				if inputClosed &&
-					len(pending) == 0 {
-					log.Printf(
-						"media_stream: stream=%s outbound audio drained, chunks_sent=%d",
-						streamSid,
-						chunkCount,
+				if inputClosed {
+					if len(pending) == 0 {
+						log.Printf(
+							"media_stream: stream=%s outbound audio drained, chunks_sent=%d",
+							streamSid,
+							chunkCount,
+						)
+						return
+					}
+
+					frame := make(
+						[]byte,
+						frameSize,
 					)
-					return
+
+					copy(
+						frame,
+						pending,
+					)
+
+					pending = pending[:0]
+
+					if err := sendFrame(
+						frame,
+					); err != nil {
+						log.Printf(
+							"media_stream: stream=%s write to twilio failed: %v",
+							streamSid,
+							err,
+						)
+						return
+					}
+
+					chunkCount++
 				}
 
 				continue
