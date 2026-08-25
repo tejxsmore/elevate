@@ -262,7 +262,6 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				&writeMu,
 				streamSid,
 				session,
-				service.NewPCMDownsampler(),
 				clearOutbound,
 				done,
 			)
@@ -351,34 +350,23 @@ func pumpOutboundAudio(
 	writeMu *sync.Mutex,
 	streamSid string,
 	session *service.VoiceSession,
-	downsampler *service.PCMDownsampler,
 	clearOutbound <-chan struct{},
 	done <-chan struct{},
 ) {
 	const (
-		frameSize       = 160
-		frameDuration   = 20 * time.Millisecond
-		startupFrames   = 8
-		startupBytes    = frameSize * startupFrames
-		maxPendingBytes = frameSize * 1000
+		frameSize     = 160
+		frameDuration = 20 * time.Millisecond
+		startupBytes  = frameSize * 5
 	)
 
-	type audioState struct {
-		mu      sync.Mutex
-		pending []byte
-		started bool
-		closed  bool
-	}
-
-	state := &audioState{
-		pending: make(
-			[]byte,
-			0,
-			frameSize*200,
-		),
-	}
+	audioInput := make(
+		chan []byte,
+		1024,
+	)
 
 	go func() {
+		defer close(audioInput)
+
 		for {
 			select {
 			case <-done:
@@ -386,9 +374,6 @@ func pumpOutboundAudio(
 
 			case audio, ok := <-session.OutboundAudio():
 				if !ok {
-					state.mu.Lock()
-					state.closed = true
-					state.mu.Unlock()
 					return
 				}
 
@@ -396,34 +381,11 @@ func pumpOutboundAudio(
 					continue
 				}
 
-				mulawAudio :=
-					downsampler.Push(audio)
-
-				if len(mulawAudio) == 0 {
-					continue
+				select {
+				case audioInput <- audio:
+				case <-done:
+					return
 				}
-
-				state.mu.Lock()
-
-				state.pending = append(
-					state.pending,
-					mulawAudio...,
-				)
-
-				if len(state.pending) >
-					maxPendingBytes {
-					overflow :=
-						len(state.pending) -
-							maxPendingBytes
-
-					state.pending =
-						append(
-							state.pending[:0],
-							state.pending[overflow:]...,
-						)
-				}
-
-				state.mu.Unlock()
 			}
 		}
 	}()
@@ -434,7 +396,37 @@ func pumpOutboundAudio(
 
 	defer ticker.Stop()
 
+	pending := make(
+		[]byte,
+		0,
+		frameSize*400,
+	)
+
+	started := false
+	inputClosed := false
 	chunkCount := 0
+
+	sendFrame := func(
+		frame []byte,
+	) error {
+		message := twilioOutboundMedia{
+			Event:     "media",
+			StreamSid: streamSid,
+			Media: twilioOutboundMediaBody{
+				Payload: base64.StdEncoding.EncodeToString(
+					frame,
+				),
+			},
+		}
+
+		writeMu.Lock()
+		err := conn.WriteJSON(
+			message,
+		)
+		writeMu.Unlock()
+
+		return err
+	}
 
 	for {
 		select {
@@ -447,97 +439,84 @@ func pumpOutboundAudio(
 			return
 
 		case <-clearOutbound:
-			state.mu.Lock()
+			pending = pending[:0]
+			started = false
 
-			state.pending =
-				state.pending[:0]
-
-			state.started = false
-
-			state.mu.Unlock()
-
-			downsampler.Reset()
-
-		case <-ticker.C:
-			var (
-				frame       []byte
-				shouldClose bool
-			)
-
-			state.mu.Lock()
-
-			if !state.started {
-				if len(state.pending) >=
-					startupBytes {
-					state.started = true
-				} else if state.closed &&
-					len(state.pending) > 0 {
-					state.started = true
+		drainAudio:
+			for {
+				select {
+				case <-audioInput:
+				default:
+					break drainAudio
 				}
 			}
 
-			if state.started &&
-				len(state.pending) >= frameSize {
-				frame = make(
-					[]byte,
-					frameSize,
-				)
-
-				copy(
-					frame,
-					state.pending[:frameSize],
-				)
-
-				copy(
-					state.pending,
-					state.pending[frameSize:],
-				)
-
-				state.pending =
-					state.pending[:len(state.pending)-frameSize]
-			}
-
-			if state.closed &&
-				len(state.pending) == 0 &&
-				frame == nil {
-				shouldClose = true
-			}
-
-			state.mu.Unlock()
-
-			if shouldClose {
-				log.Printf(
-					"media_stream: stream=%s outbound audio drained, chunks_sent=%d",
-					streamSid,
-					chunkCount,
-				)
-				return
-			}
-
-			if len(frame) == 0 {
+		case audio, ok := <-audioInput:
+			if !ok {
+				inputClosed = true
+				audioInput = nil
 				continue
 			}
 
-			message :=
-				twilioOutboundMedia{
-					Event:     "media",
-					StreamSid: streamSid,
-					Media: twilioOutboundMediaBody{
-						Payload: base64.StdEncoding.EncodeToString(
-							frame,
-						),
-					},
-				}
+			if len(audio) == 0 {
+				continue
+			}
 
-			writeMu.Lock()
-
-			err := conn.WriteJSON(
-				message,
+			pending = append(
+				pending,
+				audio...,
 			)
 
-			writeMu.Unlock()
+			if !started &&
+				len(pending) >= startupBytes {
+				started = true
+			}
 
-			if err != nil {
+		case <-ticker.C:
+			if !started {
+				if inputClosed &&
+					len(pending) > 0 {
+					started = true
+				} else {
+					continue
+				}
+			}
+
+			if len(pending) < frameSize {
+				if inputClosed &&
+					len(pending) == 0 {
+					log.Printf(
+						"media_stream: stream=%s outbound audio drained, chunks_sent=%d",
+						streamSid,
+						chunkCount,
+					)
+					return
+				}
+
+				continue
+			}
+
+			frame := make(
+				[]byte,
+				frameSize,
+			)
+
+			copy(
+				frame,
+				pending[:frameSize],
+			)
+
+			copy(
+				pending,
+				pending[frameSize:],
+			)
+
+			pending =
+				pending[:len(pending)-frameSize]
+
+			if err := sendFrame(
+				frame,
+			); err != nil {
 				log.Printf(
 					"media_stream: stream=%s write to twilio failed: %v",
 					streamSid,
