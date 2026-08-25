@@ -550,11 +550,11 @@ func (r *ActionRepo) MarkFailed(
 				ELSE 'pending'::action_status
 			END,
 
-			error_message = $2,
+			error_message = $2::text,
 
 			last_error = jsonb_build_object(
 				'message',
-				$2,
+				$2::text,
 				'failed_at',
 				now()
 			),
@@ -578,6 +578,7 @@ func (r *ActionRepo) MarkFailed(
 				)
 				ELSE completed_at
 			END
+
 		WHERE id = $1
 		  AND status = 'executing'::action_status
 		`,
@@ -629,7 +630,7 @@ func (r *ActionRepo) MarkSkipped(
 		SET
 			status = 'skipped'::action_status,
 			completed_at = now(),
-			error_message = $2,
+			error_message = $2::text,
 			locked_at = NULL,
 			locked_by = NULL,
 			lock_token = NULL,
