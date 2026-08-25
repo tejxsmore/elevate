@@ -365,7 +365,7 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 		)
 
 		if model == "" {
-			model = "gpt-4o-mini-tts"
+			model = "tts-1"
 		}
 
 		voice := strings.TrimSpace(
@@ -377,11 +377,9 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 		}
 
 		return DeepgramProvider{
-			Type:     "open_ai",
-			Model:    model,
-			Voice:    voice,
-			Language: "multi",
-			Speed:    speed,
+			Type:  "open_ai",
+			Model: model,
+			Voice: voice,
 		}
 
 	case "cartesia":
