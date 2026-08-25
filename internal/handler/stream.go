@@ -352,12 +352,18 @@ func pumpOutboundAudio(
 				continue
 			}
 
+			mulawAudio := service.Downsample24kLinear16ToMulaw8k(audio)
+
+			if len(mulawAudio) == 0 {
+				continue
+			}
+
 			message := twilioOutboundMedia{
 				Event:     "media",
 				StreamSid: streamSid,
 				Media: twilioOutboundMediaBody{
 					Payload: base64.StdEncoding.EncodeToString(
-						audio,
+						mulawAudio,
 					),
 				},
 			}

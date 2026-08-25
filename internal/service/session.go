@@ -530,8 +530,8 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 			},
 
 			Output: DeepgramAudioFormat{
-				Encoding:   "mulaw",
-				SampleRate: 8000,
+				Encoding:   "linear16",
+				SampleRate: 24000,
 				Container:  "none",
 			},
 		},
