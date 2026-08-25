@@ -68,32 +68,20 @@ func (m *VoiceSessionManager) Start(
 		)
 	}
 
-	if strings.TrimSpace(
-		cfg.ThinkProvider,
-	) == "" {
-		cfg.ThinkProvider =
-			m.dgCfg.ThinkProvider
+	if strings.TrimSpace(cfg.ThinkProvider) == "" {
+		cfg.ThinkProvider = m.dgCfg.ThinkProvider
 	}
 
-	if strings.TrimSpace(
-		cfg.ThinkModel,
-	) == "" {
-		cfg.ThinkModel =
-			m.dgCfg.ThinkModel
+	if strings.TrimSpace(cfg.ThinkModel) == "" {
+		cfg.ThinkModel = m.dgCfg.ThinkModel
 	}
 
-	if strings.TrimSpace(
-		cfg.ListenModel,
-	) == "" {
-		cfg.ListenModel =
-			m.dgCfg.ListenModel
+	if strings.TrimSpace(cfg.ListenModel) == "" {
+		cfg.ListenModel = m.dgCfg.ListenModel
 	}
 
-	if strings.TrimSpace(
-		cfg.SpeakModel,
-	) == "" {
-		cfg.SpeakModel =
-			m.dgCfg.SpeakModel
+	if strings.TrimSpace(cfg.SpeakModel) == "" {
+		cfg.SpeakModel = m.dgCfg.SpeakModel
 	}
 
 	cfg.Greeting = salesGreeting()
@@ -183,8 +171,7 @@ func (m *VoiceSessionManager) Start(
 
 		current, ok := m.sessions[callID]
 
-		if ok &&
-			current == handle {
+		if ok && current == handle {
 			delete(
 				m.sessions,
 				callID,
@@ -221,8 +208,7 @@ func (m *VoiceSessionManager) Stop(
 
 	m.mu.Unlock()
 
-	if ok &&
-		handle != nil {
+	if ok && handle != nil {
 		handle.cancel()
 	}
 }

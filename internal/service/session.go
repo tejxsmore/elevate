@@ -83,13 +83,10 @@ func languageForDeepgram(
 	switch language {
 	case models.LanguageHindi:
 		return "hi"
-
 	case models.LanguageTelugu:
 		return "te"
-
 	case models.LanguageEnglish:
 		return "en"
-
 	default:
 		return "multi"
 	}
@@ -116,16 +113,28 @@ Do NOT say:
 
 After the customer responds to the opening, react directly to what they said and continue the sales conversation.
 
-LANGUAGE BEHAVIOR:
-- English is the default language.
-- Respond in English when the customer speaks English.
-- Respond in Hindi when the customer speaks Hindi.
-- Respond in Telugu when the customer speaks Telugu.
-- If the customer switches languages, switch your response language accordingly.
-- Determine the language from the customer's latest message, not from the customer's stored profile language.
-- Do not force English when the customer is speaking Hindi or Telugu.
-- Do not translate a Hindi or Telugu response into English unless the customer switches back to English.
-- For mixed-language speech, naturally mirror the customer's language mix.
+LANGUAGE:
+English is the default language.
+
+Match the language of each user message independently.
+
+If the customer speaks English, respond in English.
+
+If the customer speaks Hindi, respond in Hindi.
+
+If the customer speaks Telugu, respond in Telugu.
+
+If the customer switches from English to Hindi, switch to Hindi.
+
+If the customer switches from Hindi to Telugu, switch to Telugu.
+
+If the customer switches back to English, switch back to English.
+
+Do not force English because the customer's stored profile language is English.
+
+Do not translate a Hindi or Telugu response into English.
+
+For mixed-language speech, naturally mirror the customer's language mix when appropriate.
 
 CONVERSATION STYLE:
 - Sound like a confident human sales representative.
@@ -250,25 +259,18 @@ func isNonSubstantiveUserText(
 	switch text {
 	case "":
 		return true
-
 	case "hi":
 		return true
-
 	case "hello":
 		return true
-
 	case "hey":
 		return true
-
 	case "hello there":
 		return true
-
 	case "hi there":
 		return true
-
 	case "hey there":
 		return true
-
 	default:
 		return false
 	}
@@ -324,111 +326,18 @@ func inferLanguageFromText(
 	return fallback
 }
 
-func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
-	thinkProvider := strings.TrimSpace(
-		v.cfg.ThinkProvider,
-	)
-
-	if thinkProvider == "" {
-		thinkProvider = strings.TrimSpace(
-			v.dgCfg.ThinkProvider,
-		)
-	}
-
-	if thinkProvider == "" {
-		thinkProvider = "open_ai"
-	}
-
-	thinkModel := strings.TrimSpace(
-		v.cfg.ThinkModel,
-	)
-
-	if thinkModel == "" {
-		thinkModel = strings.TrimSpace(
-			v.dgCfg.ThinkModel,
-		)
-	}
-
-	if thinkModel == "" {
-		thinkModel = "gpt-4.1-mini"
-	}
-
-	listenModel := strings.TrimSpace(
-		v.cfg.ListenModel,
-	)
-
-	if listenModel == "" {
-		listenModel = strings.TrimSpace(
-			v.dgCfg.ListenModel,
-		)
-	}
-
-	if listenModel == "" {
-		listenModel = "nova-3"
-	}
-
-	listenProvider := DeepgramProvider{
-		Type:        "deepgram",
-		Model:       listenModel,
-		Version:     "v1",
-		Language:    "multi",
-		SmartFormat: true,
-	}
-
-	speakProvider := v.buildSpeakProvider()
-
-	prompt := buildSalesPrompt(
-		v.cfg.SystemPrompt,
-	)
-
-	functions := []DeepgramFunction{}
-
-	if v.functions != nil {
-		functions = v.functions.Functions()
-	}
-
-	thinkProviderConfig := DeepgramProvider{
-		Type:  thinkProvider,
-		Model: thinkModel,
-	}
-
-	return DeepgramSettingsMessage{
-		Type: "Settings",
-
-		Audio: DeepgramAudioSettings{
-			Input: DeepgramAudioFormat{
-				Encoding:   "mulaw",
-				SampleRate: 8000,
-			},
-
-			Output: DeepgramAudioFormat{
-				Encoding:   "mulaw",
-				SampleRate: 8000,
-				Container:  "none",
-			},
-		},
-
-		Agent: DeepgramAgentConfig{
-			Listen: DeepgramListenConfig{
-				Provider: listenProvider,
-			},
-
-			Think: DeepgramThinkConfig{
-				Provider:  thinkProviderConfig,
-				Prompt:    prompt,
-				Functions: functions,
-			},
-
-			Speak: DeepgramSpeakConfig{
-				Provider: speakProvider,
-			},
-
-			Greeting: salesGreeting(),
-		},
-
-		Flags: &DeepgramFlags{
-			History: true,
-		},
+func languageName(
+	language models.LanguageCode,
+) string {
+	switch language {
+	case models.LanguageHindi:
+		return "Hindi"
+	case models.LanguageTelugu:
+		return "Telugu"
+	case models.LanguageEnglish:
+		return "English"
+	default:
+		return "English"
 	}
 }
 
@@ -503,6 +412,140 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 			Version: v.dgCfg.SpeakVersion,
 			Speed:   speed,
 		}
+	}
+}
+
+func (v *VoiceSession) buildSpeakEndpoint(
+	provider DeepgramProvider,
+) *DeepgramEndpoint {
+	if !strings.EqualFold(
+		provider.Type,
+		"open_ai",
+	) {
+		return nil
+	}
+
+	return &DeepgramEndpoint{
+		URL: "https://api.openai.com/v1/audio/speech",
+		Headers: map[string]string{
+			"authorization": "Bearer {{OPENAI_API_KEY}}",
+		},
+	}
+}
+
+func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
+	thinkProvider := strings.TrimSpace(
+		v.cfg.ThinkProvider,
+	)
+
+	if thinkProvider == "" {
+		thinkProvider = strings.TrimSpace(
+			v.dgCfg.ThinkProvider,
+		)
+	}
+
+	if thinkProvider == "" {
+		thinkProvider = "open_ai"
+	}
+
+	thinkModel := strings.TrimSpace(
+		v.cfg.ThinkModel,
+	)
+
+	if thinkModel == "" {
+		thinkModel = strings.TrimSpace(
+			v.dgCfg.ThinkModel,
+		)
+	}
+
+	if thinkModel == "" {
+		thinkModel = "gpt-5.6-luna"
+	}
+
+	listenModel := strings.TrimSpace(
+		v.cfg.ListenModel,
+	)
+
+	if listenModel == "" {
+		listenModel = strings.TrimSpace(
+			v.dgCfg.ListenModel,
+		)
+	}
+
+	if listenModel == "" {
+		listenModel = "nova-3"
+	}
+
+	listenProvider := DeepgramProvider{
+		Type:     "deepgram",
+		Model:    listenModel,
+		Version:  "v1",
+		Language: "multi",
+		LanguageHints: append(
+			[]string(nil),
+			v.dgCfg.LanguageHints...,
+		),
+		SmartFormat: true,
+	}
+
+	speakProvider := v.buildSpeakProvider()
+	speakEndpoint := v.buildSpeakEndpoint(
+		speakProvider,
+	)
+
+	prompt := buildSalesPrompt(
+		v.cfg.SystemPrompt,
+	)
+
+	functions := []DeepgramFunction{}
+
+	if v.functions != nil {
+		functions = v.functions.Functions()
+	}
+
+	thinkProviderConfig := DeepgramProvider{
+		Type:  thinkProvider,
+		Model: thinkModel,
+	}
+
+	return DeepgramSettingsMessage{
+		Type: "Settings",
+
+		Audio: DeepgramAudioSettings{
+			Input: DeepgramAudioFormat{
+				Encoding:   "mulaw",
+				SampleRate: 8000,
+			},
+
+			Output: DeepgramAudioFormat{
+				Encoding:   "mulaw",
+				SampleRate: 8000,
+				Container:  "none",
+			},
+		},
+
+		Agent: DeepgramAgentConfig{
+			Listen: DeepgramListenConfig{
+				Provider: listenProvider,
+			},
+
+			Think: DeepgramThinkConfig{
+				Provider:  thinkProviderConfig,
+				Prompt:    prompt,
+				Functions: functions,
+			},
+
+			Speak: DeepgramSpeakConfig{
+				Provider: speakProvider,
+				Endpoint: speakEndpoint,
+			},
+
+			Greeting: salesGreeting(),
+		},
+
+		Flags: &DeepgramFlags{
+			History: true,
+		},
 	}
 }
 
@@ -814,33 +857,6 @@ func (v *VoiceSession) persistConversationText(
 		speaker = models.SpeakerRoleLead
 		role = models.MessageRoleUser
 		isLead = true
-
-		inferredLanguage :=
-			inferLanguageFromText(
-				content,
-				v.cfg.Language,
-			)
-
-		if inferredLanguage != models.LanguageUnknown {
-			v.mu.Lock()
-
-			currentConn := v.agentConn
-
-			v.mu.Unlock()
-
-			if currentConn != nil &&
-				inferredLanguage != models.LanguageUnknown {
-				_ = currentConn.UpdatePrompt(
-					buildSalesPrompt(
-						v.cfg.SystemPrompt,
-					) + "\n\nCurrent customer language: " +
-						languageName(
-							inferredLanguage,
-						) +
-						". Respond in that language.",
-				)
-			}
-		}
 	}
 
 	language := languageFromEvent(
@@ -850,6 +866,49 @@ func (v *VoiceSession) persistConversationText(
 			v.cfg.Language,
 		),
 	)
+
+	if isLead {
+		inferredLanguage :=
+			inferLanguageFromText(
+				content,
+				v.cfg.Language,
+			)
+
+		if inferredLanguage != models.LanguageUnknown {
+			language = inferredLanguage
+		}
+
+		v.mu.Lock()
+		conn := v.agentConn
+		v.mu.Unlock()
+
+		if conn != nil {
+			updatedPrompt := buildSalesPrompt(
+				v.cfg.SystemPrompt,
+			)
+
+			updatedPrompt = strings.Join(
+				[]string{
+					updatedPrompt,
+					"",
+					"Current customer language:",
+					languageName(language),
+					"Match the customer's language for this response.",
+				},
+				"\n",
+			)
+
+			if err := conn.UpdatePrompt(
+				updatedPrompt,
+			); err != nil {
+				log.Printf(
+					"voice_session: call=%s update language prompt: %v",
+					v.cfg.CallID,
+					err,
+				)
+			}
+		}
+	}
 
 	if language != models.LanguageUnknown {
 		if err := v.conv.UpdateCallPrimaryLanguage(
@@ -926,24 +985,6 @@ func (v *VoiceSession) persistConversationText(
 	}
 
 	return nil
-}
-
-func languageName(
-	language models.LanguageCode,
-) string {
-	switch language {
-	case models.LanguageHindi:
-		return "Hindi"
-
-	case models.LanguageTelugu:
-		return "Telugu"
-
-	case models.LanguageEnglish:
-		return "English"
-
-	default:
-		return "English"
-	}
 }
 
 func (v *VoiceSession) handleFunctionCallRequest(
@@ -1095,10 +1136,7 @@ func languageFromEvent(
 		),
 	)
 
-	if strings.Contains(
-		language,
-		"-",
-	) {
+	if strings.Contains(language, "-") {
 		language = strings.SplitN(
 			language,
 			"-",

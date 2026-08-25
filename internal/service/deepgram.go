@@ -184,6 +184,7 @@ func (c *DeepgramAgentClient) Connect(
 	dialer := websocket.DefaultDialer
 
 	headers := http.Header{}
+
 	headers.Set(
 		"Authorization",
 		"Token "+strings.TrimSpace(
@@ -317,9 +318,7 @@ func (a *AgentConn) InjectAgentMessage(
 		"content": content,
 	}
 
-	if strings.TrimSpace(
-		behavior,
-	) != "" {
+	if strings.TrimSpace(behavior) != "" {
 		message["behavior"] = behavior
 	}
 
