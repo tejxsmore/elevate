@@ -40,6 +40,11 @@ type DeepgramProvider struct {
 	SmartFormat   bool     `json:"smart_format,omitempty"`
 }
 
+type DeepgramEndpoint struct {
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 type DeepgramListenConfig struct {
 	Provider DeepgramProvider `json:"provider"`
 }
@@ -57,7 +62,8 @@ type DeepgramThinkConfig struct {
 }
 
 type DeepgramSpeakConfig struct {
-	Provider DeepgramProvider `json:"provider"`
+	Provider DeepgramProvider  `json:"provider"`
+	Endpoint *DeepgramEndpoint `json:"endpoint,omitempty"`
 }
 
 type DeepgramAgentConfig struct {
@@ -121,10 +127,11 @@ type AgentEvent struct {
 }
 
 type conversationTextPayload struct {
-	Type      string   `json:"type"`
-	Role      string   `json:"role"`
-	Content   string   `json:"content"`
-	Languages []string `json:"languages,omitempty"`
+	Type            string   `json:"type"`
+	Role            string   `json:"role"`
+	Content         string   `json:"content"`
+	Languages       []string `json:"languages,omitempty"`
+	LanguagesHinted []string `json:"languages_hinted,omitempty"`
 }
 
 type functionCallRequestPayload struct {
@@ -179,7 +186,9 @@ func (c *DeepgramAgentClient) Connect(
 	headers := http.Header{}
 	headers.Set(
 		"Authorization",
-		"Token "+strings.TrimSpace(c.cfg.APIKey),
+		"Token "+strings.TrimSpace(
+			c.cfg.APIKey,
+		),
 	)
 
 	ws, _, err := dialer.DialContext(
@@ -308,7 +317,9 @@ func (a *AgentConn) InjectAgentMessage(
 		"content": content,
 	}
 
-	if strings.TrimSpace(behavior) != "" {
+	if strings.TrimSpace(
+		behavior,
+	) != "" {
 		message["behavior"] = behavior
 	}
 
@@ -362,7 +373,9 @@ func (a *AgentConn) readLoop() {
 	defer close(a.errCh)
 
 	for {
-		messageType, data, err := a.ws.ReadMessage()
+		messageType, data, err :=
+			a.ws.ReadMessage()
+
 		if err != nil {
 			a.emitError(err)
 			return
@@ -373,8 +386,11 @@ func (a *AgentConn) readLoop() {
 		if messageType == websocket.BinaryMessage {
 			a.emit(
 				AgentEvent{
-					Type:       EventAudioChunk,
-					Audio:      append([]byte(nil), data...),
+					Type: EventAudioChunk,
+					Audio: append(
+						[]byte(nil),
+						data...,
+					),
 					ReceivedAt: now,
 				},
 			)
@@ -423,6 +439,14 @@ func (a *AgentConn) readLoop() {
 					[]string(nil),
 					payload.Languages...,
 				)
+
+				if len(event.Languages) == 0 &&
+					len(payload.LanguagesHinted) > 0 {
+					event.Languages = append(
+						[]string(nil),
+						payload.LanguagesHinted...,
+					)
+				}
 			}
 
 		case EventFunctionCallRequest:

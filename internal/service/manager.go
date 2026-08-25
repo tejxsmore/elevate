@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -67,39 +68,55 @@ func (m *VoiceSessionManager) Start(
 		)
 	}
 
-	if cfg.ThinkProvider == "" {
-		cfg.ThinkProvider = m.dgCfg.ThinkProvider
+	if strings.TrimSpace(
+		cfg.ThinkProvider,
+	) == "" {
+		cfg.ThinkProvider =
+			m.dgCfg.ThinkProvider
 	}
 
-	if cfg.ThinkModel == "" {
-		cfg.ThinkModel = m.dgCfg.ThinkModel
+	if strings.TrimSpace(
+		cfg.ThinkModel,
+	) == "" {
+		cfg.ThinkModel =
+			m.dgCfg.ThinkModel
 	}
 
-	if cfg.ListenModel == "" {
-		cfg.ListenModel = m.dgCfg.ListenModel
+	if strings.TrimSpace(
+		cfg.ListenModel,
+	) == "" {
+		cfg.ListenModel =
+			m.dgCfg.ListenModel
 	}
 
-	if cfg.SpeakModel == "" {
-		cfg.SpeakModel = m.dgCfg.SpeakModel
+	if strings.TrimSpace(
+		cfg.SpeakModel,
+	) == "" {
+		cfg.SpeakModel =
+			m.dgCfg.SpeakModel
 	}
 
-	if cfg.Greeting == "" {
-		cfg.Greeting = "Hello! How can I help you today?"
-	}
+	cfg.Greeting = salesGreeting()
 
-	if m.dgCfg.APIKey == "" {
+	if strings.TrimSpace(
+		m.dgCfg.APIKey,
+	) == "" {
 		return nil, fmt.Errorf(
 			"voice_session_manager: Deepgram API key is missing",
 		)
 	}
 
-	if m.dgCfg.AgentURL == "" {
+	if strings.TrimSpace(
+		m.dgCfg.AgentURL,
+	) == "" {
 		return nil, fmt.Errorf(
 			"voice_session_manager: Deepgram agent URL is missing",
 		)
 	}
 
-	sessionCtx, cancel := context.WithCancel(ctx)
+	sessionCtx, cancel := context.WithCancel(
+		ctx,
+	)
 
 	session := NewVoiceSession(
 		m.dgCfg,
@@ -108,7 +125,9 @@ func (m *VoiceSessionManager) Start(
 		cfg,
 	)
 
-	if err := session.Connect(sessionCtx); err != nil {
+	if err := session.Connect(
+		sessionCtx,
+	); err != nil {
 		cancel()
 
 		return nil, fmt.Errorf(
@@ -125,6 +144,7 @@ func (m *VoiceSessionManager) Start(
 	m.mu.Lock()
 
 	old := m.sessions[cfg.CallID]
+
 	m.sessions[cfg.CallID] = handle
 
 	m.mu.Unlock()
@@ -137,13 +157,21 @@ func (m *VoiceSessionManager) Start(
 		callID uuid.UUID,
 		handle *sessionHandle,
 	) {
-		err := session.Loop(sessionCtx)
+		err := session.Loop(
+			sessionCtx,
+		)
 
 		cancel()
 
 		if err != nil &&
-			!errors.Is(err, context.Canceled) &&
-			!errors.Is(err, context.DeadlineExceeded) {
+			!errors.Is(
+				err,
+				context.Canceled,
+			) &&
+			!errors.Is(
+				err,
+				context.DeadlineExceeded,
+			) {
 			log.Printf(
 				"voice_session_manager: call=%s: %v",
 				callID,
@@ -155,7 +183,8 @@ func (m *VoiceSessionManager) Start(
 
 		current, ok := m.sessions[callID]
 
-		if ok && current == handle {
+		if ok &&
+			current == handle {
 			delete(
 				m.sessions,
 				callID,
@@ -174,7 +203,8 @@ func (m *VoiceSessionManager) Start(
 func (m *VoiceSessionManager) Stop(
 	callID uuid.UUID,
 ) {
-	if m == nil || callID == uuid.Nil {
+	if m == nil ||
+		callID == uuid.Nil {
 		return
 	}
 
@@ -191,7 +221,8 @@ func (m *VoiceSessionManager) Stop(
 
 	m.mu.Unlock()
 
-	if ok && handle != nil {
+	if ok &&
+		handle != nil {
 		handle.cancel()
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -115,6 +116,17 @@ Do NOT say:
 
 After the customer responds to the opening, react directly to what they said and continue the sales conversation.
 
+LANGUAGE BEHAVIOR:
+- English is the default language.
+- Respond in English when the customer speaks English.
+- Respond in Hindi when the customer speaks Hindi.
+- Respond in Telugu when the customer speaks Telugu.
+- If the customer switches languages, switch your response language accordingly.
+- Determine the language from the customer's latest message, not from the customer's stored profile language.
+- Do not force English when the customer is speaking Hindi or Telugu.
+- Do not translate a Hindi or Telugu response into English unless the customer switches back to English.
+- For mixed-language speech, naturally mirror the customer's language mix.
+
 CONVERSATION STYLE:
 - Sound like a confident human sales representative.
 - Be warm, concise, conversational, and proactive.
@@ -125,20 +137,6 @@ CONVERSATION STYLE:
 - Do not interrogate the customer with a fixed list.
 - Explain the value of an e-commerce website naturally when relevant.
 - Keep spoken responses short enough for a phone conversation.
-
-LANGUAGE:
-The customer may speak English, Hindi, Telugu, or a mixture.
-
-Match the language of the customer's latest message whenever possible.
-
-If the customer speaks:
-- English -> respond in English
-- Hindi -> respond in Hindi
-- Telugu -> respond in Telugu
-
-If the customer mixes languages, naturally code-switch as appropriate.
-
-Do not force English when the customer is speaking another supported language.
 
 DISCOVERY:
 Naturally discover:
@@ -276,6 +274,56 @@ func isNonSubstantiveUserText(
 	}
 }
 
+func inferLanguageFromText(
+	text string,
+	fallback models.LanguageCode,
+) models.LanguageCode {
+	text = strings.TrimSpace(text)
+
+	if text == "" {
+		if fallback == models.LanguageUnknown {
+			return models.LanguageEnglish
+		}
+
+		return fallback
+	}
+
+	var hasDevanagari bool
+	var hasTelugu bool
+	var hasLatin bool
+
+	for _, r := range text {
+		switch {
+		case unicode.In(r, unicode.Devanagari):
+			hasDevanagari = true
+
+		case unicode.In(r, unicode.Telugu):
+			hasTelugu = true
+
+		case unicode.In(r, unicode.Latin):
+			hasLatin = true
+		}
+	}
+
+	if hasTelugu {
+		return models.LanguageTelugu
+	}
+
+	if hasDevanagari {
+		return models.LanguageHindi
+	}
+
+	if hasLatin {
+		return models.LanguageEnglish
+	}
+
+	if fallback == models.LanguageUnknown {
+		return models.LanguageEnglish
+	}
+
+	return fallback
+}
+
 func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 	thinkProvider := strings.TrimSpace(
 		v.cfg.ThinkProvider,
@@ -319,52 +367,12 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 		listenModel = "nova-3"
 	}
 
-	listenLanguage := strings.TrimSpace(
-		v.dgCfg.ListenLanguage,
-	)
-
-	if listenLanguage == "" {
-		listenLanguage = "multi"
-	}
-
-	listenVersion := "v1"
-
-	if strings.HasPrefix(
-		strings.ToLower(listenModel),
-		"flux-",
-	) {
-		listenVersion = "v2"
-	}
-
 	listenProvider := DeepgramProvider{
 		Type:        "deepgram",
 		Model:       listenModel,
-		Version:     listenVersion,
-		SmartFormat: false,
-	}
-
-	if listenVersion == "v1" {
-		if v.cfg.Language != models.LanguageUnknown &&
-			v.cfg.Language != models.LanguageMixed {
-			listenProvider.Language =
-				languageForDeepgram(
-					v.cfg.Language,
-				)
-		} else {
-			listenProvider.Language =
-				listenLanguage
-		}
-	}
-
-	if strings.EqualFold(
-		listenModel,
-		"flux-general-multi",
-	) {
-		listenProvider.LanguageHints =
-			append(
-				[]string(nil),
-				v.dgCfg.LanguageHints...,
-			)
+		Version:     "v1",
+		Language:    "multi",
+		SmartFormat: true,
 	}
 
 	speakProvider := v.buildSpeakProvider()
@@ -432,7 +440,7 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 	)
 
 	if provider == "" {
-		provider = "deepgram"
+		provider = "open_ai"
 	}
 
 	speed := v.dgCfg.SpeakSpeed
@@ -442,18 +450,6 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 	}
 
 	switch provider {
-	case "cartesia":
-		return DeepgramProvider{
-			Type:    "cartesia",
-			ModelID: v.dgCfg.SpeakModelID,
-			Voice: map[string]any{
-				"mode": "id",
-				"id":   v.dgCfg.SpeakVoice,
-			},
-			Language: v.dgCfg.SpeakLanguage,
-			Speed:    speed,
-		}
-
 	case "open_ai":
 		model := strings.TrimSpace(
 			v.dgCfg.SpeakModel,
@@ -463,11 +459,31 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 			model = "gpt-4o-mini-tts"
 		}
 
+		voice := strings.TrimSpace(
+			v.dgCfg.SpeakVoice,
+		)
+
+		if voice == "" {
+			voice = "alloy"
+		}
+
 		return DeepgramProvider{
 			Type:     "open_ai",
 			Model:    model,
-			Voice:    v.dgCfg.SpeakVoice,
-			Language: v.dgCfg.SpeakLanguage,
+			Voice:    voice,
+			Language: "multi",
+			Speed:    speed,
+		}
+
+	case "cartesia":
+		return DeepgramProvider{
+			Type:    "cartesia",
+			ModelID: v.dgCfg.SpeakModelID,
+			Voice: map[string]any{
+				"mode": "id",
+				"id":   v.dgCfg.SpeakVoice,
+			},
+			Language: "multi",
 			Speed:    speed,
 		}
 
@@ -476,37 +492,15 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 			Type:     "eleven_labs",
 			ModelID:  v.dgCfg.SpeakModelID,
 			Voice:    v.dgCfg.SpeakVoice,
-			Language: v.dgCfg.SpeakLanguage,
+			Language: "multi",
 			Speed:    speed,
 		}
 
 	default:
-		model := strings.TrimSpace(
-			v.cfg.SpeakModel,
-		)
-
-		if model == "" {
-			model = strings.TrimSpace(
-				v.dgCfg.SpeakModel,
-			)
-		}
-
-		if model == "" {
-			model = "aura-2-thalia-en"
-		}
-
-		version := strings.TrimSpace(
-			v.dgCfg.SpeakVersion,
-		)
-
-		if version == "" {
-			version = "v1"
-		}
-
 		return DeepgramProvider{
 			Type:    "deepgram",
-			Model:   model,
-			Version: version,
+			Model:   v.dgCfg.SpeakModel,
+			Version: v.dgCfg.SpeakVersion,
 			Speed:   speed,
 		}
 	}
@@ -820,11 +814,41 @@ func (v *VoiceSession) persistConversationText(
 		speaker = models.SpeakerRoleLead
 		role = models.MessageRoleUser
 		isLead = true
+
+		inferredLanguage :=
+			inferLanguageFromText(
+				content,
+				v.cfg.Language,
+			)
+
+		if inferredLanguage != models.LanguageUnknown {
+			v.mu.Lock()
+
+			currentConn := v.agentConn
+
+			v.mu.Unlock()
+
+			if currentConn != nil &&
+				inferredLanguage != models.LanguageUnknown {
+				_ = currentConn.UpdatePrompt(
+					buildSalesPrompt(
+						v.cfg.SystemPrompt,
+					) + "\n\nCurrent customer language: " +
+						languageName(
+							inferredLanguage,
+						) +
+						". Respond in that language.",
+				)
+			}
+		}
 	}
 
 	language := languageFromEvent(
 		ev,
-		v.cfg.Language,
+		inferLanguageFromText(
+			content,
+			v.cfg.Language,
+		),
 	)
 
 	if language != models.LanguageUnknown {
@@ -902,6 +926,24 @@ func (v *VoiceSession) persistConversationText(
 	}
 
 	return nil
+}
+
+func languageName(
+	language models.LanguageCode,
+) string {
+	switch language {
+	case models.LanguageHindi:
+		return "Hindi"
+
+	case models.LanguageTelugu:
+		return "Telugu"
+
+	case models.LanguageEnglish:
+		return "English"
+
+	default:
+		return "English"
+	}
 }
 
 func (v *VoiceSession) handleFunctionCallRequest(
