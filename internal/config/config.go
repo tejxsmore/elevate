@@ -63,6 +63,7 @@ type DeepgramConfig struct {
 	ThinkProvider  string
 	ThinkModel     string
 	BaseURL        string
+	OpenAIAPIKey   string
 }
 
 type TwilioConfig struct {
@@ -287,6 +288,11 @@ func Load() (*Config, error) {
 				),
 				"/",
 			),
+
+			OpenAIAPIKey: getEnv(
+				"OPENAI_API_KEY",
+				"",
+			),
 		},
 
 		Twilio: TwilioConfig{
@@ -452,6 +458,13 @@ func (c *Config) validate() error {
 	if c.Deepgram.SpeakSpeed <= 0 {
 		return fmt.Errorf(
 			"DEEPGRAM_SPEAK_SPEED must be greater than zero",
+		)
+	}
+
+	if strings.EqualFold(c.Deepgram.SpeakProvider, "open_ai") &&
+		strings.TrimSpace(c.Deepgram.OpenAIAPIKey) == "" {
+		return fmt.Errorf(
+			"OPENAI_API_KEY cannot be empty when DEEPGRAM_SPEAK_PROVIDER=open_ai",
 		)
 	}
 

@@ -425,10 +425,23 @@ func (v *VoiceSession) buildSpeakEndpoint(
 		return nil
 	}
 
+	key := strings.TrimSpace(
+		v.dgCfg.OpenAIAPIKey,
+	)
+
+	if key == "" {
+		log.Printf(
+			"voice_session: call=%s OPENAI_API_KEY is empty, speak endpoint will fail auth",
+			v.cfg.CallID,
+		)
+
+		return nil
+	}
+
 	return &DeepgramEndpoint{
 		URL: "https://api.openai.com/v1/audio/speech",
 		Headers: map[string]string{
-			"authorization": "Bearer {{OPENAI_API_KEY}}",
+			"authorization": "Bearer " + key,
 		},
 	}
 }
