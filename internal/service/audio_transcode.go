@@ -1,5 +1,7 @@
 package service
 
+import "sync"
+
 const (
 	muLawBias = 0x84
 	muLawClip = 32635
@@ -33,25 +35,41 @@ func linear16SampleToMulaw(sample int16) byte {
 	return ^(sign | (exponent << 4) | mantissa)
 }
 
-func Downsample24kLinear16ToMulaw8k(pcm []byte) []byte {
-	if len(pcm) < 6 {
-		return nil
-	}
+type PCMDownsampler struct {
+	mu       sync.Mutex
+	leftover []byte
+}
 
-	sampleCount := len(pcm) / 2
-	frameCount := sampleCount / 3
+func NewPCMDownsampler() *PCMDownsampler {
+	return &PCMDownsampler{}
+}
 
-	out := make([]byte, 0, frameCount)
+func (d *PCMDownsampler) Push(pcm []byte) []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
-	for i := 0; i+6 <= len(pcm); i += 6 {
-		s1 := int16(uint16(pcm[i]) | uint16(pcm[i+1])<<8)
-		s2 := int16(uint16(pcm[i+2]) | uint16(pcm[i+3])<<8)
-		s3 := int16(uint16(pcm[i+4]) | uint16(pcm[i+5])<<8)
+	buf := append(d.leftover, pcm...)
+	usable := len(buf) - (len(buf) % 6)
+
+	out := make([]byte, 0, usable/6)
+
+	for i := 0; i+6 <= usable; i += 6 {
+		s1 := int16(uint16(buf[i]) | uint16(buf[i+1])<<8)
+		s2 := int16(uint16(buf[i+2]) | uint16(buf[i+3])<<8)
+		s3 := int16(uint16(buf[i+4]) | uint16(buf[i+5])<<8)
 
 		avg := (int32(s1) + int32(s2) + int32(s3)) / 3
 
 		out = append(out, linear16SampleToMulaw(int16(avg)))
 	}
 
+	d.leftover = append([]byte(nil), buf[usable:]...)
+
 	return out
+}
+
+func (d *PCMDownsampler) Reset() {
+	d.mu.Lock()
+	d.leftover = nil
+	d.mu.Unlock()
 }

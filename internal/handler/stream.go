@@ -266,6 +266,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				&writeMu,
 				streamSid,
 				session,
+				service.NewPCMDownsampler(),
 				done,
 			)
 
@@ -324,6 +325,7 @@ func pumpOutboundAudio(
 	writeMu *sync.Mutex,
 	streamSid string,
 	session *service.VoiceSession,
+	downsampler *service.PCMDownsampler,
 	done <-chan struct{},
 ) {
 	chunkCount := 0
@@ -352,7 +354,7 @@ func pumpOutboundAudio(
 				continue
 			}
 
-			mulawAudio := service.Downsample24kLinear16ToMulaw8k(audio)
+			mulawAudio := downsampler.Push(audio)
 
 			if len(mulawAudio) == 0 {
 				continue
@@ -362,18 +364,12 @@ func pumpOutboundAudio(
 				Event:     "media",
 				StreamSid: streamSid,
 				Media: twilioOutboundMediaBody{
-					Payload: base64.StdEncoding.EncodeToString(
-						mulawAudio,
-					),
+					Payload: base64.StdEncoding.EncodeToString(mulawAudio),
 				},
 			}
 
 			writeMu.Lock()
-
-			err := conn.WriteJSON(
-				message,
-			)
-
+			err := conn.WriteJSON(message)
 			writeMu.Unlock()
 
 			if err != nil {

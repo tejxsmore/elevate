@@ -77,9 +77,7 @@ func (v *VoiceSession) Interruptions() <-chan struct{} {
 	return v.interruptions
 }
 
-func languageForDeepgram(
-	language models.LanguageCode,
-) string {
+func languageForDeepgram(language models.LanguageCode) string {
 	switch language {
 	case models.LanguageHindi:
 		return "hi"
@@ -218,12 +216,8 @@ The goal is to understand whether the customer is genuinely interested in buying
 `)
 }
 
-func buildSalesPrompt(
-	customPrompt string,
-) string {
-	customPrompt = strings.TrimSpace(
-		customPrompt,
-	)
+func buildSalesPrompt(customPrompt string) string {
+	customPrompt = strings.TrimSpace(customPrompt)
 
 	base := defaultSalesPrompt()
 
@@ -242,19 +236,9 @@ func buildSalesPrompt(
 	)
 }
 
-func isNonSubstantiveUserText(
-	content string,
-) bool {
-	text := strings.ToLower(
-		strings.TrimSpace(
-			content,
-		),
-	)
-
-	text = strings.Trim(
-		text,
-		".!?,'\" ",
-	)
+func isNonSubstantiveUserText(content string) bool {
+	text := strings.ToLower(strings.TrimSpace(content))
+	text = strings.Trim(text, ".!?,'\" ")
 
 	switch text {
 	case "":
@@ -276,17 +260,13 @@ func isNonSubstantiveUserText(
 	}
 }
 
-func inferLanguageFromText(
-	text string,
-	fallback models.LanguageCode,
-) models.LanguageCode {
+func inferLanguageFromText(text string, fallback models.LanguageCode) models.LanguageCode {
 	text = strings.TrimSpace(text)
 
 	if text == "" {
 		if fallback == models.LanguageUnknown {
 			return models.LanguageEnglish
 		}
-
 		return fallback
 	}
 
@@ -298,10 +278,8 @@ func inferLanguageFromText(
 		switch {
 		case unicode.In(r, unicode.Devanagari):
 			hasDevanagari = true
-
 		case unicode.In(r, unicode.Telugu):
 			hasTelugu = true
-
 		case unicode.In(r, unicode.Latin):
 			hasLatin = true
 		}
@@ -326,9 +304,7 @@ func inferLanguageFromText(
 	return fallback
 }
 
-func languageName(
-	language models.LanguageCode,
-) string {
+func languageName(language models.LanguageCode) string {
 	switch language {
 	case models.LanguageHindi:
 		return "Hindi"
@@ -342,11 +318,7 @@ func languageName(
 }
 
 func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
-	provider := strings.ToLower(
-		strings.TrimSpace(
-			v.dgCfg.SpeakProvider,
-		),
-	)
+	provider := strings.ToLower(strings.TrimSpace(v.dgCfg.SpeakProvider))
 
 	if provider == "" {
 		provider = "open_ai"
@@ -360,17 +332,13 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 
 	switch provider {
 	case "open_ai":
-		model := strings.TrimSpace(
-			v.dgCfg.SpeakModel,
-		)
+		model := strings.TrimSpace(v.dgCfg.SpeakModel)
 
 		if model == "" {
 			model = "tts-1"
 		}
 
-		voice := strings.TrimSpace(
-			v.dgCfg.SpeakVoice,
-		)
+		voice := strings.TrimSpace(v.dgCfg.SpeakVoice)
 
 		if voice == "" {
 			voice = "alloy"
@@ -413,26 +381,18 @@ func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 	}
 }
 
-func (v *VoiceSession) buildSpeakEndpoint(
-	provider DeepgramProvider,
-) *DeepgramEndpoint {
-	if !strings.EqualFold(
-		provider.Type,
-		"open_ai",
-	) {
+func (v *VoiceSession) buildSpeakEndpoint(provider DeepgramProvider) *DeepgramEndpoint {
+	if !strings.EqualFold(provider.Type, "open_ai") {
 		return nil
 	}
 
-	key := strings.TrimSpace(
-		v.dgCfg.OpenAIAPIKey,
-	)
+	key := strings.TrimSpace(v.dgCfg.OpenAIAPIKey)
 
 	if key == "" {
 		log.Printf(
 			"voice_session: call=%s OPENAI_API_KEY is empty, speak endpoint will fail auth",
 			v.cfg.CallID,
 		)
-
 		return nil
 	}
 
@@ -445,42 +405,30 @@ func (v *VoiceSession) buildSpeakEndpoint(
 }
 
 func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
-	thinkProvider := strings.TrimSpace(
-		v.cfg.ThinkProvider,
-	)
+	thinkProvider := strings.TrimSpace(v.cfg.ThinkProvider)
 
 	if thinkProvider == "" {
-		thinkProvider = strings.TrimSpace(
-			v.dgCfg.ThinkProvider,
-		)
+		thinkProvider = strings.TrimSpace(v.dgCfg.ThinkProvider)
 	}
 
 	if thinkProvider == "" {
 		thinkProvider = "open_ai"
 	}
 
-	thinkModel := strings.TrimSpace(
-		v.cfg.ThinkModel,
-	)
+	thinkModel := strings.TrimSpace(v.cfg.ThinkModel)
 
 	if thinkModel == "" {
-		thinkModel = strings.TrimSpace(
-			v.dgCfg.ThinkModel,
-		)
+		thinkModel = strings.TrimSpace(v.dgCfg.ThinkModel)
 	}
 
 	if thinkModel == "" {
 		thinkModel = "gpt-5.6-luna"
 	}
 
-	listenModel := strings.TrimSpace(
-		v.cfg.ListenModel,
-	)
+	listenModel := strings.TrimSpace(v.cfg.ListenModel)
 
 	if listenModel == "" {
-		listenModel = strings.TrimSpace(
-			v.dgCfg.ListenModel,
-		)
+		listenModel = strings.TrimSpace(v.dgCfg.ListenModel)
 	}
 
 	if listenModel == "" {
@@ -492,22 +440,16 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 		Model: listenModel,
 	}
 
-	agentLanguage := strings.TrimSpace(
-		v.dgCfg.ListenLanguage,
-	)
+	agentLanguage := strings.TrimSpace(v.dgCfg.ListenLanguage)
 
 	if agentLanguage == "" {
 		agentLanguage = "multi"
 	}
 
 	speakProvider := v.buildSpeakProvider()
-	speakEndpoint := v.buildSpeakEndpoint(
-		speakProvider,
-	)
+	speakEndpoint := v.buildSpeakEndpoint(speakProvider)
 
-	prompt := buildSalesPrompt(
-		v.cfg.SystemPrompt,
-	)
+	prompt := buildSalesPrompt(v.cfg.SystemPrompt)
 
 	functions := []DeepgramFunction{}
 
@@ -528,7 +470,6 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 				Encoding:   "mulaw",
 				SampleRate: 8000,
 			},
-
 			Output: DeepgramAudioFormat{
 				Encoding:   "linear16",
 				SampleRate: 24000,
@@ -563,30 +504,18 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 	}
 }
 
-func (v *VoiceSession) Connect(
-	ctx context.Context,
-) error {
+func (v *VoiceSession) Connect(ctx context.Context) error {
 	if v == nil {
-		return fmt.Errorf(
-			"voice_session: session is nil",
-		)
+		return fmt.Errorf("voice_session: session is nil")
 	}
 
 	if v.deepgram == nil {
-		return fmt.Errorf(
-			"voice_session: Deepgram client is not configured",
-		)
+		return fmt.Errorf("voice_session: Deepgram client is not configured")
 	}
 
-	conn, err := v.deepgram.Connect(
-		ctx,
-		v.buildSettings(),
-	)
+	conn, err := v.deepgram.Connect(ctx, v.buildSettings())
 	if err != nil {
-		return fmt.Errorf(
-			"voice_session: connect Deepgram: %w",
-			err,
-		)
+		return fmt.Errorf("voice_session: connect Deepgram: %w", err)
 	}
 
 	v.mu.Lock()
@@ -596,13 +525,9 @@ func (v *VoiceSession) Connect(
 	return nil
 }
 
-func (v *VoiceSession) Loop(
-	ctx context.Context,
-) error {
+func (v *VoiceSession) Loop(ctx context.Context) error {
 	if v == nil {
-		return fmt.Errorf(
-			"voice_session: session is nil",
-		)
+		return fmt.Errorf("voice_session: session is nil")
 	}
 
 	v.mu.Lock()
@@ -610,59 +535,81 @@ func (v *VoiceSession) Loop(
 	v.mu.Unlock()
 
 	if conn == nil {
-		return fmt.Errorf(
-			"voice_session: Loop called before Connect",
-		)
+		return fmt.Errorf("voice_session: Loop called before Connect")
 	}
 
-	defer conn.Close()
 	defer close(v.outboundAudio)
 
 	go v.pumpInboundAudio(ctx)
 
+	backoff := 500 * time.Millisecond
+	maxBackoff := 5 * time.Second
+	maxAttempts := 6
+	attempts := 0
+
 	for {
+		err := v.runOnce(ctx, conn)
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if err == nil {
+			return nil
+		}
+
+		attempts++
+
+		log.Printf(
+			"voice_session: call=%s connection lost (attempt %d/%d): %v",
+			v.cfg.CallID,
+			attempts,
+			maxAttempts,
+			err,
+		)
+
+		if attempts >= maxAttempts {
+			return fmt.Errorf(
+				"voice_session: call=%s giving up after %d reconnect attempts: %w",
+				v.cfg.CallID,
+				attempts,
+				err,
+			)
+		}
+
 		select {
+		case <-time.After(backoff):
 		case <-ctx.Done():
 			return ctx.Err()
+		}
 
-		case err, ok := <-conn.Errors():
-			if !ok || err == nil {
-				return nil
-			}
-
-			return err
-
-		case event, ok := <-conn.Events():
-			if !ok {
-				return nil
-			}
-
-			if err := v.handleEvent(
-				ctx,
-				event,
-			); err != nil {
-				log.Printf(
-					"voice_session: call=%s event=%s: %v",
-					v.cfg.CallID,
-					event.Type,
-					err,
-				)
-
-				if event.Type ==
-					EventFunctionCallRequest {
-					v.handleFunctionCallError(
-						event,
-						err,
-					)
-				}
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 		}
+
+		newConn, connectErr := v.deepgram.Connect(ctx, v.buildSettings())
+		if connectErr != nil {
+			log.Printf(
+				"voice_session: call=%s reconnect failed: %v",
+				v.cfg.CallID,
+				connectErr,
+			)
+			continue
+		}
+
+		v.mu.Lock()
+		v.agentConn = newConn
+		v.mu.Unlock()
+
+		conn = newConn
+		backoff = 500 * time.Millisecond
 	}
 }
 
-func (v *VoiceSession) Run(
-	ctx context.Context,
-) error {
+func (v *VoiceSession) Run(ctx context.Context) error {
 	if err := v.Connect(ctx); err != nil {
 		return err
 	}
@@ -670,9 +617,7 @@ func (v *VoiceSession) Run(
 	return v.Loop(ctx)
 }
 
-func (v *VoiceSession) pumpInboundAudio(
-	ctx context.Context,
-) {
+func (v *VoiceSession) pumpInboundAudio(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -692,29 +637,85 @@ func (v *VoiceSession) pumpInboundAudio(
 			v.mu.Unlock()
 
 			if conn == nil {
-				return
+				continue
 			}
 
-			if err := conn.SendAudio(
-				chunk,
-			); err != nil {
+			if err := conn.SendAudio(chunk); err != nil {
 				log.Printf(
 					"voice_session: call=%s send audio: %v",
 					v.cfg.CallID,
 					err,
 				)
-
-				_ = conn.Close()
-				return
+				continue
 			}
 		}
 	}
 }
 
-func (v *VoiceSession) handleEvent(
-	ctx context.Context,
-	ev AgentEvent,
-) error {
+func (v *VoiceSession) runOnce(ctx context.Context, conn *AgentConn) error {
+	keepAliveDone := make(chan struct{})
+	defer close(keepAliveDone)
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-keepAliveDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.KeepAlive(); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	defer conn.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case err, ok := <-conn.Errors():
+			if !ok || err == nil {
+				return nil
+			}
+			return err
+
+		case event, ok := <-conn.Events():
+			if !ok {
+				select {
+				case err := <-conn.Errors():
+					if err != nil {
+						return err
+					}
+				default:
+				}
+				return nil
+			}
+
+			if err := v.handleEvent(ctx, event); err != nil {
+				log.Printf(
+					"voice_session: call=%s event=%s: %v",
+					v.cfg.CallID,
+					event.Type,
+					err,
+				)
+
+				if event.Type == EventFunctionCallRequest {
+					v.handleFunctionCallError(event, err)
+				}
+			}
+		}
+	}
+}
+
+func (v *VoiceSession) handleEvent(ctx context.Context, ev AgentEvent) error {
 	switch ev.Type {
 	case EventAudioChunk:
 		if len(ev.Audio) == 0 {
@@ -728,30 +729,18 @@ func (v *VoiceSession) handleEvent(
 		}
 
 	case EventUserStartedSpeaking:
-		v.handleUserStartedSpeaking(
-			ctx,
-			ev,
-		)
+		v.handleUserStartedSpeaking(ctx, ev)
 
 	case EventConversationText:
-		return v.persistConversationText(
-			ctx,
-			ev,
-		)
+		return v.persistConversationText(ctx, ev)
 
 	case EventFunctionCallRequest:
-		return v.handleFunctionCallRequest(
-			ctx,
-			ev,
-		)
+		return v.handleFunctionCallRequest(ctx, ev)
 
 	case EventAgentAudioDone:
-		return v.handleAgentAudioDone(
-			ctx,
-		)
+		return v.handleAgentAudioDone(ctx)
 
-	case EventWarning,
-		EventError:
+	case EventWarning, EventError:
 		log.Printf(
 			"voice_session: call=%s deepgram %s: %s",
 			v.cfg.CallID,
@@ -763,16 +752,11 @@ func (v *VoiceSession) handleEvent(
 	return nil
 }
 
-func (v *VoiceSession) handleUserStartedSpeaking(
-	ctx context.Context,
-	ev AgentEvent,
-) {
+func (v *VoiceSession) handleUserStartedSpeaking(ctx context.Context, ev AgentEvent) {
 	v.mu.Lock()
-
 	v.turnSeq++
 	sequence := v.turnSeq
 	v.turnStartedAt = ev.ReceivedAt
-
 	v.mu.Unlock()
 
 	select {
@@ -780,18 +764,13 @@ func (v *VoiceSession) handleUserStartedSpeaking(
 	default:
 	}
 
-	turnID, err := v.conv.StartTurn(
-		ctx,
-		v.cfg.CallID,
-		sequence,
-	)
+	turnID, err := v.conv.StartTurn(ctx, v.cfg.CallID, sequence)
 	if err != nil {
 		log.Printf(
 			"voice_session: call=%s start turn: %v",
 			v.cfg.CallID,
 			err,
 		)
-
 		return
 	}
 
@@ -800,30 +779,20 @@ func (v *VoiceSession) handleUserStartedSpeaking(
 	v.mu.Unlock()
 }
 
-func (v *VoiceSession) handleAgentAudioDone(
-	ctx context.Context,
-) error {
+func (v *VoiceSession) handleAgentAudioDone(ctx context.Context) error {
 	v.mu.Lock()
-
 	turnID := v.currentTurnID
 	started := v.turnStartedAt
 	sequence := v.turnSeq
-
 	v.mu.Unlock()
 
 	if turnID == nil {
 		return nil
 	}
 
-	latency := int(
-		time.Since(started).Milliseconds(),
-	)
+	latency := int(time.Since(started).Milliseconds())
 
-	if err := v.conv.CompleteTurn(
-		ctx,
-		*turnID,
-		&latency,
-	); err != nil {
+	if err := v.conv.CompleteTurn(ctx, *turnID, &latency); err != nil {
 		return err
 	}
 
@@ -836,38 +805,26 @@ func (v *VoiceSession) handleAgentAudioDone(
 	)
 }
 
-func (v *VoiceSession) persistConversationText(
-	ctx context.Context,
-	ev AgentEvent,
-) error {
-	content := strings.TrimSpace(
-		ev.Content,
-	)
+func (v *VoiceSession) persistConversationText(ctx context.Context, ev AgentEvent) error {
+	content := strings.TrimSpace(ev.Content)
 
 	if content == "" {
 		return nil
 	}
 
 	v.mu.Lock()
-
 	v.segmentSeq++
 	segmentSequence := v.segmentSeq
-
 	v.messageSeq++
 	messageSequence := v.messageSeq
-
 	turnID := v.currentTurnID
-
 	v.mu.Unlock()
 
 	speaker := models.SpeakerRoleAgent
 	role := models.MessageRoleAssistant
 	isLead := false
 
-	if strings.EqualFold(
-		strings.TrimSpace(ev.Role),
-		"user",
-	) {
+	if strings.EqualFold(strings.TrimSpace(ev.Role), "user") {
 		speaker = models.SpeakerRoleLead
 		role = models.MessageRoleUser
 		isLead = true
@@ -875,18 +832,11 @@ func (v *VoiceSession) persistConversationText(
 
 	language := languageFromEvent(
 		ev,
-		inferLanguageFromText(
-			content,
-			v.cfg.Language,
-		),
+		inferLanguageFromText(content, v.cfg.Language),
 	)
 
 	if isLead {
-		inferredLanguage :=
-			inferLanguageFromText(
-				content,
-				v.cfg.Language,
-			)
+		inferredLanguage := inferLanguageFromText(content, v.cfg.Language)
 
 		if inferredLanguage != models.LanguageUnknown {
 			language = inferredLanguage
@@ -897,9 +847,7 @@ func (v *VoiceSession) persistConversationText(
 		v.mu.Unlock()
 
 		if conn != nil {
-			updatedPrompt := buildSalesPrompt(
-				v.cfg.SystemPrompt,
-			)
+			updatedPrompt := buildSalesPrompt(v.cfg.SystemPrompt)
 
 			updatedPrompt = strings.Join(
 				[]string{
@@ -912,9 +860,7 @@ func (v *VoiceSession) persistConversationText(
 				"\n",
 			)
 
-			if err := conn.UpdatePrompt(
-				updatedPrompt,
-			); err != nil {
+			if err := conn.UpdatePrompt(updatedPrompt); err != nil {
 				log.Printf(
 					"voice_session: call=%s update language prompt: %v",
 					v.cfg.CallID,
@@ -925,22 +871,12 @@ func (v *VoiceSession) persistConversationText(
 	}
 
 	if language != models.LanguageUnknown {
-		if err := v.conv.UpdateCallPrimaryLanguage(
-			ctx,
-			v.cfg.CallID,
-			language,
-		); err != nil {
-			return fmt.Errorf(
-				"update primary language: %w",
-				err,
-			)
+		if err := v.conv.UpdateCallPrimaryLanguage(ctx, v.cfg.CallID, language); err != nil {
+			return fmt.Errorf("update primary language: %w", err)
 		}
 	}
 
-	detectedLanguages := append(
-		[]string(nil),
-		ev.Languages...,
-	)
+	detectedLanguages := append([]string(nil), ev.Languages...)
 
 	if detectedLanguages == nil {
 		detectedLanguages = []string{}
@@ -961,10 +897,7 @@ func (v *VoiceSession) persistConversationText(
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"insert transcript segment: %w",
-			err,
-		)
+		return fmt.Errorf("insert transcript segment: %w", err)
 	}
 
 	if _, err := v.conv.InsertCallMessage(
@@ -975,21 +908,11 @@ func (v *VoiceSession) persistConversationText(
 		role,
 		content,
 	); err != nil {
-		return fmt.Errorf(
-			"insert call message: %w",
-			err,
-		)
+		return fmt.Errorf("insert call message: %w", err)
 	}
 
-	if isLead &&
-		v.functions != nil &&
-		!isNonSubstantiveUserText(content) {
-		if err := v.functions.ProcessUserText(
-			ctx,
-			v.cfg.CallID,
-			content,
-			&segmentID,
-		); err != nil {
+	if isLead && v.functions != nil && !isNonSubstantiveUserText(content) {
+		if err := v.functions.ProcessUserText(ctx, v.cfg.CallID, content, &segmentID); err != nil {
 			log.Printf(
 				"voice_session: call=%s process user text: %v",
 				v.cfg.CallID,
@@ -1001,14 +924,9 @@ func (v *VoiceSession) persistConversationText(
 	return nil
 }
 
-func (v *VoiceSession) handleFunctionCallRequest(
-	ctx context.Context,
-	ev AgentEvent,
-) error {
+func (v *VoiceSession) handleFunctionCallRequest(ctx context.Context, ev AgentEvent) error {
 	if v.functions == nil {
-		return fmt.Errorf(
-			"agent function executor is not configured",
-		)
+		return fmt.Errorf("agent function executor is not configured")
 	}
 
 	v.mu.Lock()
@@ -1016,9 +934,7 @@ func (v *VoiceSession) handleFunctionCallRequest(
 	v.mu.Unlock()
 
 	if conn == nil {
-		return fmt.Errorf(
-			"Deepgram connection is closed",
-		)
+		return fmt.Errorf("Deepgram connection is closed")
 	}
 
 	for _, function := range ev.Functions {
@@ -1026,45 +942,37 @@ func (v *VoiceSession) handleFunctionCallRequest(
 			continue
 		}
 
-		result, err := v.functions.Execute(
-			ctx,
-			v.cfg.CallID,
-			v.cfg.LeadID,
-			function,
-		)
+		result, err := v.functions.Execute(ctx, v.cfg.CallID, v.cfg.LeadID, function)
 
 		if err != nil {
-			errorResult, marshalErr :=
-				json.Marshal(
-					map[string]any{
-						"success": false,
-						"error":   err.Error(),
-					},
-				)
+			errorResult, marshalErr := json.Marshal(
+				map[string]any{
+					"success": false,
+					"error":   err.Error(),
+				},
+			)
 
 			if marshalErr != nil {
 				return marshalErr
 			}
 
-			if responseErr :=
-				conn.SendFunctionCallResponse(
-					function.ID,
-					function.Name,
-					string(errorResult),
-				); responseErr != nil {
+			if responseErr := conn.SendFunctionCallResponse(
+				function.ID,
+				function.Name,
+				string(errorResult),
+			); responseErr != nil {
 				return responseErr
 			}
 
 			continue
 		}
 
-		successResult, marshalErr :=
-			json.Marshal(
-				map[string]any{
-					"success": true,
-					"result":  result,
-				},
-			)
+		successResult, marshalErr := json.Marshal(
+			map[string]any{
+				"success": true,
+				"result":  result,
+			},
+		)
 
 		if marshalErr != nil {
 			return marshalErr
@@ -1082,10 +990,7 @@ func (v *VoiceSession) handleFunctionCallRequest(
 	return nil
 }
 
-func (v *VoiceSession) handleFunctionCallError(
-	ev AgentEvent,
-	err error,
-) {
+func (v *VoiceSession) handleFunctionCallError(ev AgentEvent, err error) {
 	v.mu.Lock()
 	conn := v.agentConn
 	v.mu.Unlock()
@@ -1094,13 +999,12 @@ func (v *VoiceSession) handleFunctionCallError(
 		return
 	}
 
-	content, marshalErr :=
-		json.Marshal(
-			map[string]any{
-				"success": false,
-				"error":   err.Error(),
-			},
-		)
+	content, marshalErr := json.Marshal(
+		map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		},
+	)
 
 	if marshalErr != nil {
 		log.Printf(
@@ -1108,7 +1012,6 @@ func (v *VoiceSession) handleFunctionCallError(
 			v.cfg.CallID,
 			marshalErr,
 		)
-
 		return
 	}
 
@@ -1132,10 +1035,7 @@ func (v *VoiceSession) handleFunctionCallError(
 	}
 }
 
-func languageFromEvent(
-	ev AgentEvent,
-	fallback models.LanguageCode,
-) models.LanguageCode {
+func languageFromEvent(ev AgentEvent, fallback models.LanguageCode) models.LanguageCode {
 	if len(ev.Languages) == 0 {
 		return fallback
 	}
@@ -1144,30 +1044,19 @@ func languageFromEvent(
 		return models.LanguageMixed
 	}
 
-	language := strings.ToLower(
-		strings.TrimSpace(
-			ev.Languages[0],
-		),
-	)
+	language := strings.ToLower(strings.TrimSpace(ev.Languages[0]))
 
 	if strings.Contains(language, "-") {
-		language = strings.SplitN(
-			language,
-			"-",
-			2,
-		)[0]
+		language = strings.SplitN(language, "-", 2)[0]
 	}
 
 	switch language {
 	case "en":
 		return models.LanguageEnglish
-
 	case "hi":
 		return models.LanguageHindi
-
 	case "te":
 		return models.LanguageTelugu
-
 	default:
 		return fallback
 	}
