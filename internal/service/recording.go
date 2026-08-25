@@ -57,9 +57,7 @@ func NewRecordingServiceWithBaseURL(
 		"/",
 	)
 
-	if strings.TrimSpace(
-		cfg.S3Bucket,
-	) == "" {
+	if strings.TrimSpace(cfg.S3Bucket) == "" {
 		return &RecordingService{
 			accountSID: accountSID,
 			authToken:  authToken,
@@ -77,13 +75,16 @@ func NewRecordingServiceWithBaseURL(
 		}, nil
 	}
 
-	awsCfg, err :=
-		awsconfig.LoadDefaultConfig(
-			ctx,
-			awsconfig.WithRegion(
-				cfg.Region,
-			),
-		)
+	awsCfg, err := awsconfig.LoadDefaultConfig(
+		ctx,
+		awsconfig.WithRegion(cfg.Region),
+		awsconfig.WithRequestChecksumCalculation(
+			aws.RequestChecksumCalculationWhenRequired,
+		),
+		awsconfig.WithResponseChecksumValidation(
+			aws.ResponseChecksumValidationWhenRequired,
+		),
+	)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"recording: load AWS config: %w",
@@ -120,9 +121,7 @@ func NewRecordingServiceWithBaseURL(
 func (s *RecordingService) Enabled() bool {
 	return s != nil &&
 		s.s3 != nil &&
-		strings.TrimSpace(
-			s.bucket,
-		) != ""
+		strings.TrimSpace(s.bucket) != ""
 }
 
 func (s *RecordingService) StoreTwilioRecording(
@@ -137,13 +136,8 @@ func (s *RecordingService) StoreTwilioRecording(
 		)
 	}
 
-	recordingSID = strings.TrimSpace(
-		recordingSID,
-	)
-
-	recordingURL = strings.TrimSpace(
-		recordingURL,
-	)
+	recordingSID = strings.TrimSpace(recordingSID)
+	recordingURL = strings.TrimSpace(recordingURL)
 
 	if recordingSID == "" {
 		return "", fmt.Errorf(
@@ -167,9 +161,7 @@ func (s *RecordingService) StoreTwilioRecording(
 
 	defer resp.Body.Close()
 
-	audio, err := io.ReadAll(
-		resp.Body,
-	)
+	audio, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf(
 			"recording: read Twilio recording: %w",
@@ -190,18 +182,14 @@ func (s *RecordingService) StoreTwilioRecording(
 	)
 
 	contentType := strings.TrimSpace(
-		resp.Header.Get(
-			"Content-Type",
-		),
+		resp.Header.Get("Content-Type"),
 	)
 
 	if contentType == "" {
 		contentType = "audio/mpeg"
 	}
 
-	contentLength := int64(
-		len(audio),
-	)
+	contentLength := int64(len(audio))
 
 	_, err = s.s3.PutObject(
 		ctx,
@@ -212,9 +200,7 @@ func (s *RecordingService) StoreTwilioRecording(
 			Key: aws.String(
 				key,
 			),
-			Body: bytes.NewReader(
-				audio,
-			),
+			Body:          bytes.NewReader(audio),
 			ContentLength: &contentLength,
 			ContentType: aws.String(
 				contentType,
@@ -244,16 +230,13 @@ func (s *RecordingService) SignedURL(
 	recordingURL string,
 	expires time.Duration,
 ) (string, error) {
-	if !s.Enabled() ||
-		s.presign == nil {
+	if !s.Enabled() || s.presign == nil {
 		return "", fmt.Errorf(
 			"recording storage is not configured",
 		)
 	}
 
-	key := strings.TrimSpace(
-		recordingURL,
-	)
+	key := strings.TrimSpace(recordingURL)
 
 	if key == "" {
 		return "", fmt.Errorf(
@@ -261,13 +244,8 @@ func (s *RecordingService) SignedURL(
 		)
 	}
 
-	if strings.HasPrefix(
-		key,
-		"http://",
-	) || strings.HasPrefix(
-		key,
-		"https://",
-	) {
+	if strings.HasPrefix(key, "http://") ||
+		strings.HasPrefix(key, "https://") {
 		marker := "/recordings/"
 
 		index := strings.Index(
@@ -291,21 +269,20 @@ func (s *RecordingService) SignedURL(
 		expires = 15 * time.Minute
 	}
 
-	request, err :=
-		s.presign.PresignGetObject(
-			ctx,
-			&s3.GetObjectInput{
-				Bucket: aws.String(
-					s.bucket,
-				),
-				Key: aws.String(
-					key,
-				),
-			},
-			func(options *s3.PresignOptions) {
-				options.Expires = expires
-			},
-		)
+	request, err := s.presign.PresignGetObject(
+		ctx,
+		&s3.GetObjectInput{
+			Bucket: aws.String(
+				s.bucket,
+			),
+			Key: aws.String(
+				key,
+			),
+		},
+		func(options *s3.PresignOptions) {
+			options.Expires = expires
+		},
+	)
 	if err != nil {
 		return "", fmt.Errorf(
 			"presign recording: %w",
@@ -325,13 +302,12 @@ func (s *RecordingService) downloadTwilioRecording(
 		"/",
 	) + ".mp3"
 
-	req, err :=
-		http.NewRequestWithContext(
-			ctx,
-			http.MethodGet,
-			u,
-			nil,
-		)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		u,
+		nil,
+	)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"recording: build Twilio request: %w",
@@ -344,9 +320,7 @@ func (s *RecordingService) downloadTwilioRecording(
 		s.authToken,
 	)
 
-	resp, err := s.httpClient.Do(
-		req,
-	)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"recording: download Twilio recording: %w",

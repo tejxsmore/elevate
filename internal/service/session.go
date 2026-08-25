@@ -94,29 +94,26 @@ func languageForDeepgram(
 	}
 }
 
+func salesGreeting() string {
+	return "Hi, I'm calling from Elevate. We build e-commerce websites for businesses. I wanted to quickly understand what you're looking for. What kind of products do you sell?"
+}
+
 func defaultSalesPrompt() string {
 	return strings.TrimSpace(`
 You are an AI outbound sales representative from Elevate, calling a potential customer about e-commerce website development.
 
 Your job is to have a natural sales conversation, understand the customer's business, qualify their buying intent, and take the appropriate next action.
 
-IMPORTANT OPENING BEHAVIOR:
-Do NOT open with "How can I help you?"
-Do NOT behave like a customer-support assistant.
-Do NOT wait for the customer to invent the topic.
+The system greeting already introduces Elevate and asks the first discovery question.
 
-Start the call with a short, friendly sales introduction.
+Do not generate another greeting or introduction after the system greeting.
 
-Your opening should communicate:
-- you are calling from Elevate
-- Elevate builds e-commerce websites
-- you are calling to understand what the customer needs
-- then ask one natural discovery question
+Do NOT say:
+"Hello! How can I help you today?"
+"How can I help you?"
+"Hi, I am the agent from Elevate."
 
-Example opening style:
-"Hi, I'm calling from Elevate. We build e-commerce websites for businesses. I wanted to quickly understand your business and see what you're looking for. What kind of products do you sell?"
-
-Do not repeat this example word-for-word every time. Keep the meaning but make the conversation sound natural.
+After the customer responds to the opening, react directly to what they said and continue the sales conversation.
 
 CONVERSATION STYLE:
 - Sound like a confident human sales representative.
@@ -160,7 +157,9 @@ Do not necessarily ask these in this order.
 Use the customer's previous answer to choose the most natural next question.
 
 INTENT:
-Infer buying intent from the customer's actual statements.
+Do not classify the lead from a greeting, acknowledgment, or one-word response.
+
+Only classify when there is enough meaningful evidence about the customer's business or buying intent.
 
 HOT:
 - clear buying intent
@@ -185,9 +184,9 @@ Call update_discovery whenever the customer provides meaningful business, produc
 
 Call record_barrier when the customer expresses a genuine budget, timing, decision-maker, trust, or other obstacle.
 
-Call update_classification when there is enough evidence to classify the lead.
+Call update_classification only when enough evidence exists to classify the lead.
 
-If the customer shows high buying intent, call request_whatsapp so the WhatsApp action can happen while the call is still active.
+If the customer clearly asks to receive details, examples, a brochure, resume, or other information through WhatsApp, call request_whatsapp during the call.
 
 If the customer asks to be called later or gives a callback time, call schedule_callback.
 
@@ -208,7 +207,6 @@ Do not mention:
 
 Do not invent information that the customer did not provide.
 
-The goal is not merely to collect information.
 The goal is to understand whether the customer is genuinely interested in buying an e-commerce website and move the conversation forward naturally.
 `)
 }
@@ -216,7 +214,9 @@ The goal is to understand whether the customer is genuinely interested in buying
 func buildSalesPrompt(
 	customPrompt string,
 ) string {
-	customPrompt = strings.TrimSpace(customPrompt)
+	customPrompt = strings.TrimSpace(
+		customPrompt,
+	)
 
 	base := defaultSalesPrompt()
 
@@ -233,6 +233,47 @@ func buildSalesPrompt(
 		},
 		"\n",
 	)
+}
+
+func isNonSubstantiveUserText(
+	content string,
+) bool {
+	text := strings.ToLower(
+		strings.TrimSpace(
+			content,
+		),
+	)
+
+	text = strings.Trim(
+		text,
+		".!?,'\" ",
+	)
+
+	switch text {
+	case "":
+		return true
+
+	case "hi":
+		return true
+
+	case "hello":
+		return true
+
+	case "hey":
+		return true
+
+	case "hello there":
+		return true
+
+	case "hi there":
+		return true
+
+	case "hey there":
+		return true
+
+	default:
+		return false
+	}
 }
 
 func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
@@ -310,7 +351,8 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 					v.cfg.Language,
 				)
 		} else {
-			listenProvider.Language = listenLanguage
+			listenProvider.Language =
+				listenLanguage
 		}
 	}
 
@@ -335,14 +377,6 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 
 	if v.functions != nil {
 		functions = v.functions.Functions()
-	}
-
-	greeting := strings.TrimSpace(
-		v.cfg.Greeting,
-	)
-
-	if greeting == "" {
-		greeting = "Hi, I'm calling from Elevate. We build e-commerce websites for businesses. I wanted to quickly understand what you're looking for. What kind of products do you sell?"
 	}
 
 	thinkProviderConfig := DeepgramProvider{
@@ -381,7 +415,7 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 				Provider: speakProvider,
 			},
 
-			Greeting: greeting,
+			Greeting: salesGreeting(),
 		},
 
 		Flags: &DeepgramFlags{
@@ -850,7 +884,9 @@ func (v *VoiceSession) persistConversationText(
 		)
 	}
 
-	if isLead && v.functions != nil {
+	if isLead &&
+		v.functions != nil &&
+		!isNonSubstantiveUserText(content) {
 		if err := v.functions.ProcessUserText(
 			ctx,
 			v.cfg.CallID,

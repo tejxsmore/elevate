@@ -272,11 +272,13 @@ func (e *AgentFunctionExecutor) ProcessUserText(
 	var update repository.DiscoveryUpdate
 
 	if extracted.BusinessNiche != "" {
-		update.BusinessNiche = &extracted.BusinessNiche
+		update.BusinessNiche =
+			&extracted.BusinessNiche
 	}
 
 	if extracted.ProductsSold != "" {
-		update.ProductsSold = &extracted.ProductsSold
+		update.ProductsSold =
+			&extracted.ProductsSold
 	}
 
 	if extracted.ProductCountEstimate != "" {
@@ -327,7 +329,10 @@ func (e *AgentFunctionExecutor) ProcessUserText(
 		)
 	}
 
-	if extracted.HasBarrier {
+	if extracted.HasBarrier &&
+		strings.TrimSpace(
+			extracted.BarrierDetail,
+		) != "" {
 		if err := e.discoveryRepo.AddBarrier(
 			ctx,
 			callID,
@@ -342,6 +347,51 @@ func (e *AgentFunctionExecutor) ProcessUserText(
 		}
 	}
 
+	hasEvidence := false
+
+	if profile.BusinessNiche != nil &&
+		strings.TrimSpace(
+			*profile.BusinessNiche,
+		) != "" {
+		hasEvidence = true
+	}
+
+	if profile.ProductsSold != nil &&
+		strings.TrimSpace(
+			*profile.ProductsSold,
+		) != "" {
+		hasEvidence = true
+	}
+
+	if profile.ProductCountEstimate != nil &&
+		strings.TrimSpace(
+			*profile.ProductCountEstimate,
+		) != "" {
+		hasEvidence = true
+	}
+
+	if profile.BudgetRange != nil &&
+		strings.TrimSpace(
+			*profile.BudgetRange,
+		) != "" {
+		hasEvidence = true
+	}
+
+	if profile.Timeline != nil &&
+		strings.TrimSpace(
+			*profile.Timeline,
+		) != "" {
+		hasEvidence = true
+	}
+
+	if len(profile.FeaturesRequested) > 0 {
+		hasEvidence = true
+	}
+
+	if !hasEvidence && !extracted.HasBarrier {
+		return nil
+	}
+
 	result := NewClassifier().Classify(
 		content,
 		profile,
@@ -349,77 +399,74 @@ func (e *AgentFunctionExecutor) ProcessUserText(
 		extracted.BarrierType,
 	)
 
-	if result.Label != models.ClassificationUnclassified {
-		_, err := e.classificationRepo.Create(
+	if result.Label ==
+		models.ClassificationUnclassified {
+		return nil
+	}
+
+	item, err := e.classificationRepo.Create(
+		ctx,
+		callID,
+		result.Label,
+		result.Confidence,
+		result.Summary,
+		result.Signals,
+		segmentID,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"process_user_text: classification: %w",
+			err,
+		)
+	}
+
+	if e.callRepo != nil {
+		confidence := result.Confidence
+
+		if item.Confidence != nil {
+			confidence = *item.Confidence
+		}
+
+		if err := e.callRepo.SetClassification(
 			ctx,
 			callID,
-			result.Label,
-			result.Confidence,
-			result.Summary,
-			result.Signals,
-			segmentID,
-		)
-		if err != nil {
+			item.Classification,
+			confidence,
+			item.SequenceNumber,
+		); err != nil {
 			return fmt.Errorf(
-				"process_user_text: classification: %w",
+				"process_user_text: sync classification: %w",
 				err,
 			)
 		}
+	}
 
-		switch result.Label {
-		case models.ClassificationHot:
-			_, err := e.actionService.Ensure(
-				ctx,
+	if result.Label == models.ClassificationHot &&
+		result.Confidence >= 0.80 {
+		_, err := e.actionService.Ensure(
+			ctx,
+			callID,
+			models.ActionWhatsappMidCall,
+			models.TriggerIntentDetected,
+			segmentID,
+			map[string]any{
+				"classification": "hot",
+				"confidence":     result.Confidence,
+				"quote":          content,
+				"summary":        result.Summary,
+				"signals":        result.Signals,
+			},
+			fmt.Sprintf(
+				"%s:%s",
 				callID,
 				models.ActionWhatsappMidCall,
-				models.TriggerIntentDetected,
-				segmentID,
-				map[string]any{
-					"classification": "hot",
-					"confidence":     result.Confidence,
-					"quote":          content,
-					"summary":        result.Summary,
-					"signals":        result.Signals,
-				},
-				fmt.Sprintf(
-					"%s:%s",
-					callID,
-					models.ActionWhatsappMidCall,
-				),
+			),
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"process_user_text: hot action: %w",
+				err,
 			)
-			if err != nil {
-				return fmt.Errorf(
-					"process_user_text: hot action: %w",
-					err,
-				)
-			}
-
-		case models.ClassificationCold:
-			_, err := e.actionService.Ensure(
-				ctx,
-				callID,
-				models.ActionWhatsappBrochure,
-				models.TriggerIntentDetected,
-				segmentID,
-				map[string]any{
-					"classification": "cold",
-					"confidence":     result.Confidence,
-					"quote":          content,
-					"summary":        result.Summary,
-					"signals":        result.Signals,
-				},
-				fmt.Sprintf(
-					"%s:%s",
-					callID,
-					models.ActionWhatsappBrochure,
-				),
-			)
-			if err != nil {
-				return fmt.Errorf(
-					"process_user_text: cold action: %w",
-					err,
-				)
-			}
 		}
 	}
 
