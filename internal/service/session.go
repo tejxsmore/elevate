@@ -449,10 +449,9 @@ func (v *VoiceSession) buildSettings(
 	}
 
 	listenProvider := DeepgramProvider{
-		Type:          "deepgram",
-		Model:         listenModel,
-		Language:      "multi",
-		LanguageHints: v.dgCfg.LanguageHints,
+		Type:     "deepgram",
+		Model:    listenModel,
+		Language: "multi",
 	}
 
 	agentLanguage := "multi"
@@ -702,9 +701,23 @@ func (v *VoiceSession) pumpInboundAudio(
 				continue
 			}
 
-			if err := conn.SendAudio(chunk); err != nil {
+			select {
+			case <-conn.Done():
+				continue
+			default:
+			}
+
+			if err := conn.SendAudio(
+				chunk,
+			); err != nil {
 				if ctx.Err() != nil {
 					return
+				}
+
+				select {
+				case <-conn.Done():
+					continue
+				default:
 				}
 
 				log.Printf(

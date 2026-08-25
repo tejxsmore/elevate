@@ -154,12 +154,16 @@ func NewDeepgramAgentClient(
 }
 
 type AgentConn struct {
-	ws        *websocket.Conn
-	events    chan AgentEvent
-	errCh     chan error
-	closeOnce sync.Once
-	writeMu   sync.Mutex
-	done      chan struct{}
+	ws           *websocket.Conn
+	events       chan AgentEvent
+	errCh        chan error
+	closeOnce    sync.Once
+	writeMu      sync.Mutex
+	done         chan struct{}
+	ready        chan struct{}
+	readyOnce    sync.Once
+	settingsErr  chan error
+	settingsOnce sync.Once
 }
 
 func (c *DeepgramAgentClient) Connect(
@@ -167,22 +171,34 @@ func (c *DeepgramAgentClient) Connect(
 	settings DeepgramSettingsMessage,
 ) (*AgentConn, error) {
 	if c == nil {
-		return nil, fmt.Errorf("deepgram: client is nil")
+		return nil, fmt.Errorf(
+			"deepgram: client is nil",
+		)
 	}
 
-	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return nil, fmt.Errorf("deepgram: API key is missing")
+	if strings.TrimSpace(
+		c.cfg.APIKey,
+	) == "" {
+		return nil, fmt.Errorf(
+			"deepgram: API key is missing",
+		)
 	}
 
-	if strings.TrimSpace(c.cfg.AgentURL) == "" {
-		return nil, fmt.Errorf("deepgram: agent URL is missing")
+	if strings.TrimSpace(
+		c.cfg.AgentURL,
+	) == "" {
+		return nil, fmt.Errorf(
+			"deepgram: agent URL is missing",
+		)
 	}
 
 	headers := http.Header{}
 
 	headers.Set(
 		"Authorization",
-		"Token "+strings.TrimSpace(c.cfg.APIKey),
+		"Token "+strings.TrimSpace(
+			c.cfg.APIKey,
+		),
 	)
 
 	dialer := websocket.Dialer{
@@ -205,31 +221,41 @@ func (c *DeepgramAgentClient) Connect(
 		)
 	}
 
-	ws.SetReadLimit(32 * 1024 * 1024)
+	ws.SetReadLimit(
+		32 * 1024 * 1024,
+	)
 
 	conn := &AgentConn{
-		ws:     ws,
-		events: make(chan AgentEvent, 4096),
-		errCh:  make(chan error, 1),
-		done:   make(chan struct{}),
+		ws:          ws,
+		events:      make(chan AgentEvent, 4096),
+		errCh:       make(chan error, 1),
+		done:        make(chan struct{}),
+		ready:       make(chan struct{}),
+		settingsErr: make(chan error, 1),
 	}
 
-	ws.SetPingHandler(func(appData string) error {
-		conn.writeMu.Lock()
-		defer conn.writeMu.Unlock()
+	ws.SetPingHandler(
+		func(appData string) error {
+			conn.writeMu.Lock()
+			defer conn.writeMu.Unlock()
 
-		deadline := time.Now().Add(
-			5 * time.Second,
-		)
+			deadline := time.Now().Add(
+				5 * time.Second,
+			)
 
-		return ws.WriteControl(
-			websocket.PongMessage,
-			[]byte(appData),
-			deadline,
-		)
-	})
+			return ws.WriteControl(
+				websocket.PongMessage,
+				[]byte(appData),
+				deadline,
+			)
+		},
+	)
 
-	if err := conn.writeJSON(settings); err != nil {
+	go conn.readLoop()
+
+	if err := conn.writeJSON(
+		settings,
+	); err != nil {
 		_ = ws.Close()
 
 		return nil, fmt.Errorf(
@@ -238,7 +264,16 @@ func (c *DeepgramAgentClient) Connect(
 		)
 	}
 
-	go conn.readLoop()
+	if err := conn.waitUntilReady(
+		ctx,
+	); err != nil {
+		_ = conn.Close()
+
+		return nil, fmt.Errorf(
+			"deepgram: settings not applied: %w",
+			err,
+		)
+	}
 
 	return conn, nil
 }
@@ -495,6 +530,41 @@ func (a *AgentConn) readLoop() {
 			ReceivedAt: now,
 		}
 
+		if event.Type == EventSettingsApplied {
+			a.markReady()
+		}
+
+		if event.Type == EventError {
+			var payload struct {
+				Type        string `json:"type"`
+				Description string `json:"description"`
+				Code        string `json:"code"`
+			}
+
+			if err := json.Unmarshal(
+				data,
+				&payload,
+			); err == nil {
+				message := strings.TrimSpace(
+					payload.Description,
+				)
+
+				if message == "" {
+					message = "Deepgram rejected Settings"
+				}
+
+				if strings.TrimSpace(
+					payload.Code,
+				) != "" {
+					message += ": " + payload.Code
+				}
+
+				a.markSettingsError(
+					fmt.Errorf("%s", message),
+				)
+			}
+		}
+
 		switch event.Type {
 		case EventConversationText:
 			var payload conversationTextPayload
@@ -537,5 +607,59 @@ func (a *AgentConn) readLoop() {
 		if !a.emit(event) {
 			return
 		}
+	}
+}
+
+func (a *AgentConn) markReady() {
+	if a == nil {
+		return
+	}
+
+	a.readyOnce.Do(func() {
+		close(a.ready)
+	})
+}
+
+func (a *AgentConn) markSettingsError(
+	err error,
+) {
+	if a == nil || err == nil {
+		return
+	}
+
+	a.settingsOnce.Do(func() {
+		a.settingsErr <- err
+	})
+}
+
+func (a *AgentConn) waitUntilReady(
+	ctx context.Context,
+) error {
+	if a == nil {
+		return fmt.Errorf(
+			"deepgram: connection is nil",
+		)
+	}
+
+	select {
+	case <-a.ready:
+		return nil
+
+	case err := <-a.settingsErr:
+		if err == nil {
+			return fmt.Errorf(
+				"deepgram: settings rejected",
+			)
+		}
+
+		return err
+
+	case <-a.done:
+		return fmt.Errorf(
+			"deepgram: connection closed before SettingsApplied",
+		)
+
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
