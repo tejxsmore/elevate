@@ -107,6 +107,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 	)
 
 	done := make(chan struct{})
+
 	var stopOnce sync.Once
 	var writeMu sync.Mutex
 
@@ -124,12 +125,12 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 			return
 		}
 
-		message := twilioClearMessage{
-			Event:     "clear",
-			StreamSid: streamSid,
-		}
-
-		if err := writeJSON(message); err != nil {
+		if err := writeJSON(
+			twilioClearMessage{
+				Event:     "clear",
+				StreamSid: streamSid,
+			},
+		); err != nil {
 			log.Printf(
 				"media_stream: call=%s clear failed: %v",
 				callID,
@@ -266,7 +267,6 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				&writeMu,
 				streamSid,
 				session,
-				service.NewPCMDownsampler(),
 				done,
 			)
 
@@ -303,6 +303,10 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				continue
 			}
 
+			if len(audio) == 0 {
+				continue
+			}
+
 			select {
 			case session.InboundAudio() <- audio:
 
@@ -325,7 +329,6 @@ func pumpOutboundAudio(
 	writeMu *sync.Mutex,
 	streamSid string,
 	session *service.VoiceSession,
-	downsampler *service.PCMDownsampler,
 	done <-chan struct{},
 ) {
 	chunkCount := 0
@@ -354,22 +357,22 @@ func pumpOutboundAudio(
 				continue
 			}
 
-			mulawAudio := downsampler.Push(audio)
-
-			if len(mulawAudio) == 0 {
-				continue
-			}
-
 			message := twilioOutboundMedia{
 				Event:     "media",
 				StreamSid: streamSid,
 				Media: twilioOutboundMediaBody{
-					Payload: base64.StdEncoding.EncodeToString(mulawAudio),
+					Payload: base64.StdEncoding.EncodeToString(
+						audio,
+					),
 				},
 			}
 
 			writeMu.Lock()
-			err := conn.WriteJSON(message)
+
+			err := conn.WriteJSON(
+				message,
+			)
+
 			writeMu.Unlock()
 
 			if err != nil {

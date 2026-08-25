@@ -165,35 +165,25 @@ func (c *DeepgramAgentClient) Connect(
 	settings DeepgramSettingsMessage,
 ) (*AgentConn, error) {
 	if c == nil {
-		return nil, fmt.Errorf(
-			"deepgram: client is nil",
-		)
+		return nil, fmt.Errorf("deepgram: client is nil")
 	}
 
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return nil, fmt.Errorf(
-			"deepgram: API key is missing",
-		)
+		return nil, fmt.Errorf("deepgram: API key is missing")
 	}
 
 	if strings.TrimSpace(c.cfg.AgentURL) == "" {
-		return nil, fmt.Errorf(
-			"deepgram: agent URL is missing",
-		)
+		return nil, fmt.Errorf("deepgram: agent URL is missing")
 	}
-
-	dialer := websocket.DefaultDialer
 
 	headers := http.Header{}
 
 	headers.Set(
 		"Authorization",
-		"Token "+strings.TrimSpace(
-			c.cfg.APIKey,
-		),
+		"Token "+strings.TrimSpace(c.cfg.APIKey),
 	)
 
-	ws, _, err := dialer.DialContext(
+	ws, _, err := websocket.DefaultDialer.DialContext(
 		ctx,
 		c.cfg.AgentURL,
 		headers,
@@ -207,7 +197,7 @@ func (c *DeepgramAgentClient) Connect(
 
 	conn := &AgentConn{
 		ws:     ws,
-		events: make(chan AgentEvent, 256),
+		events: make(chan AgentEvent, 2048),
 		errCh:  make(chan error, 1),
 	}
 
@@ -347,12 +337,8 @@ func (a *AgentConn) Close() error {
 func (a *AgentConn) emit(
 	event AgentEvent,
 ) bool {
-	select {
-	case a.events <- event:
-		return true
-	default:
-		return false
-	}
+	a.events <- event
+	return true
 }
 
 func (a *AgentConn) emitError(
@@ -373,8 +359,7 @@ func (a *AgentConn) readLoop() {
 	defer close(a.errCh)
 
 	for {
-		messageType, data, err :=
-			a.ws.ReadMessage()
+		messageType, data, err := a.ws.ReadMessage()
 
 		if err != nil {
 			a.emitError(err)
@@ -386,11 +371,8 @@ func (a *AgentConn) readLoop() {
 		if messageType == websocket.BinaryMessage {
 			a.emit(
 				AgentEvent{
-					Type: EventAudioChunk,
-					Audio: append(
-						[]byte(nil),
-						data...,
-					),
+					Type:       EventAudioChunk,
+					Audio:      append([]byte(nil), data...),
 					ReceivedAt: now,
 				},
 			)
@@ -414,17 +396,12 @@ func (a *AgentConn) readLoop() {
 		}
 
 		event := AgentEvent{
-			Type: AgentEventType(
-				head.Type,
-			),
-			Raw: append(
-				json.RawMessage(nil),
-				data...,
-			),
+			Type:       AgentEventType(head.Type),
+			Raw:        append(json.RawMessage(nil), data...),
 			ReceivedAt: now,
 		}
 
-		switch AgentEventType(head.Type) {
+		switch event.Type {
 		case EventConversationText:
 			var payload conversationTextPayload
 
@@ -434,7 +411,6 @@ func (a *AgentConn) readLoop() {
 			); err == nil {
 				event.Role = payload.Role
 				event.Content = payload.Content
-
 				event.Languages = append(
 					[]string(nil),
 					payload.Languages...,
@@ -447,6 +423,7 @@ func (a *AgentConn) readLoop() {
 						payload.LanguagesHinted...,
 					)
 				}
+
 			}
 
 		case EventFunctionCallRequest:

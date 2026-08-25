@@ -39,12 +39,15 @@ type VoiceSession struct {
 	inboundAudio  chan []byte
 	outboundAudio chan []byte
 	interruptions chan struct{}
-	mu            sync.Mutex
-	turnSeq       int
-	segmentSeq    int
-	messageSeq    int
-	currentTurnID *uuid.UUID
-	turnStartedAt time.Time
+
+	mu             sync.Mutex
+	agentSpeaking  bool
+	greetingActive bool
+	turnSeq        int
+	segmentSeq     int
+	messageSeq     int
+	currentTurnID  *uuid.UUID
+	turnStartedAt  time.Time
 }
 
 func NewVoiceSession(
@@ -54,14 +57,15 @@ func NewVoiceSession(
 	cfg VoiceSessionConfig,
 ) *VoiceSession {
 	return &VoiceSession{
-		cfg:           cfg,
-		dgCfg:         dgCfg,
-		deepgram:      NewDeepgramAgentClient(dgCfg),
-		conv:          conv,
-		functions:     functions,
-		inboundAudio:  make(chan []byte, 256),
-		outboundAudio: make(chan []byte, 256),
-		interruptions: make(chan struct{}, 8),
+		cfg:            cfg,
+		dgCfg:          dgCfg,
+		deepgram:       NewDeepgramAgentClient(dgCfg),
+		conv:           conv,
+		functions:      functions,
+		inboundAudio:   make(chan []byte, 1024),
+		outboundAudio:  make(chan []byte, 1024),
+		interruptions:  make(chan struct{}, 8),
+		greetingActive: true,
 	}
 }
 
@@ -471,9 +475,8 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 				SampleRate: 8000,
 			},
 			Output: DeepgramAudioFormat{
-				Encoding:   "linear16",
-				SampleRate: 24000,
-				Container:  "none",
+				Encoding:   "mulaw",
+				SampleRate: 8000,
 			},
 		},
 
@@ -715,12 +718,24 @@ func (v *VoiceSession) runOnce(ctx context.Context, conn *AgentConn) error {
 	}
 }
 
-func (v *VoiceSession) handleEvent(ctx context.Context, ev AgentEvent) error {
+func (v *VoiceSession) handleEvent(
+	ctx context.Context,
+	ev AgentEvent,
+) error {
 	switch ev.Type {
+	case EventAgentStartedSpeaking:
+		v.mu.Lock()
+		v.agentSpeaking = true
+		v.mu.Unlock()
+
 	case EventAudioChunk:
 		if len(ev.Audio) == 0 {
 			return nil
 		}
+
+		v.mu.Lock()
+		v.agentSpeaking = true
+		v.mu.Unlock()
 
 		select {
 		case v.outboundAudio <- ev.Audio:
@@ -752,19 +767,33 @@ func (v *VoiceSession) handleEvent(ctx context.Context, ev AgentEvent) error {
 	return nil
 }
 
-func (v *VoiceSession) handleUserStartedSpeaking(ctx context.Context, ev AgentEvent) {
+func (v *VoiceSession) handleUserStartedSpeaking(
+	ctx context.Context,
+	ev AgentEvent,
+) {
 	v.mu.Lock()
+
 	v.turnSeq++
 	sequence := v.turnSeq
 	v.turnStartedAt = ev.ReceivedAt
+
+	shouldInterrupt := v.agentSpeaking &&
+		!v.greetingActive
+
 	v.mu.Unlock()
 
-	select {
-	case v.interruptions <- struct{}{}:
-	default:
+	if shouldInterrupt {
+		select {
+		case v.interruptions <- struct{}{}:
+		default:
+		}
 	}
 
-	turnID, err := v.conv.StartTurn(ctx, v.cfg.CallID, sequence)
+	turnID, err := v.conv.StartTurn(
+		ctx,
+		v.cfg.CallID,
+		sequence,
+	)
 	if err != nil {
 		log.Printf(
 			"voice_session: call=%s start turn: %v",
@@ -779,20 +808,33 @@ func (v *VoiceSession) handleUserStartedSpeaking(ctx context.Context, ev AgentEv
 	v.mu.Unlock()
 }
 
-func (v *VoiceSession) handleAgentAudioDone(ctx context.Context) error {
+func (v *VoiceSession) handleAgentAudioDone(
+	ctx context.Context,
+) error {
 	v.mu.Lock()
+
+	v.agentSpeaking = false
+	v.greetingActive = false
+
 	turnID := v.currentTurnID
 	started := v.turnStartedAt
 	sequence := v.turnSeq
+
 	v.mu.Unlock()
 
 	if turnID == nil {
 		return nil
 	}
 
-	latency := int(time.Since(started).Milliseconds())
+	latency := int(
+		time.Since(started).Milliseconds(),
+	)
 
-	if err := v.conv.CompleteTurn(ctx, *turnID, &latency); err != nil {
+	if err := v.conv.CompleteTurn(
+		ctx,
+		*turnID,
+		&latency,
+	); err != nil {
 		return err
 	}
 
