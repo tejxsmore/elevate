@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -158,6 +159,7 @@ type AgentConn struct {
 	errCh     chan error
 	closeOnce sync.Once
 	writeMu   sync.Mutex
+	done      chan struct{}
 }
 
 func (c *DeepgramAgentClient) Connect(
@@ -183,7 +185,15 @@ func (c *DeepgramAgentClient) Connect(
 		"Token "+strings.TrimSpace(c.cfg.APIKey),
 	)
 
-	ws, _, err := websocket.DefaultDialer.DialContext(
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 15 * time.Second,
+		NetDialContext: (&net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+
+	ws, _, err := dialer.DialContext(
 		ctx,
 		c.cfg.AgentURL,
 		headers,
@@ -195,11 +205,33 @@ func (c *DeepgramAgentClient) Connect(
 		)
 	}
 
+	ws.SetReadLimit(32 * 1024 * 1024)
+
 	conn := &AgentConn{
 		ws:     ws,
-		events: make(chan AgentEvent, 2048),
+		events: make(chan AgentEvent, 4096),
 		errCh:  make(chan error, 1),
+		done:   make(chan struct{}),
 	}
+
+	ws.SetPingHandler(func(appData string) error {
+		conn.writeMu.Lock()
+		defer conn.writeMu.Unlock()
+
+		deadline := time.Now().Add(
+			5 * time.Second,
+		)
+
+		if err := ws.WriteControl(
+			websocket.PongMessage,
+			[]byte(appData),
+			deadline,
+		); err != nil {
+			return err
+		}
+
+		return nil
+	})
 
 	if err := conn.writeJSON(settings); err != nil {
 		_ = ws.Close()
@@ -223,9 +255,17 @@ func (a *AgentConn) Errors() <-chan error {
 	return a.errCh
 }
 
+func (a *AgentConn) Done() <-chan struct{} {
+	return a.done
+}
+
 func (a *AgentConn) writeJSON(
 	value any,
 ) error {
+	if a == nil || a.ws == nil {
+		return fmt.Errorf("deepgram: connection is closed")
+	}
+
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
 
@@ -235,6 +275,10 @@ func (a *AgentConn) writeJSON(
 func (a *AgentConn) SendAudio(
 	audio []byte,
 ) error {
+	if a == nil || a.ws == nil {
+		return fmt.Errorf("deepgram: connection is closed")
+	}
+
 	if len(audio) == 0 {
 		return nil
 	}
@@ -325,10 +369,33 @@ func (a *AgentConn) KeepAlive() error {
 }
 
 func (a *AgentConn) Close() error {
+	if a == nil {
+		return nil
+	}
+
 	var err error
 
 	a.closeOnce.Do(func() {
-		err = a.ws.Close()
+		if a.ws != nil {
+			a.writeMu.Lock()
+
+			deadline := time.Now().Add(
+				2 * time.Second,
+			)
+
+			_ = a.ws.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(
+					websocket.CloseNormalClosure,
+					"",
+				),
+				deadline,
+			)
+
+			a.writeMu.Unlock()
+
+			err = a.ws.Close()
+		}
 	})
 
 	return err
@@ -337,8 +404,17 @@ func (a *AgentConn) Close() error {
 func (a *AgentConn) emit(
 	event AgentEvent,
 ) bool {
-	a.events <- event
-	return true
+	if a == nil {
+		return false
+	}
+
+	select {
+	case a.events <- event:
+		return true
+
+	case <-a.done:
+		return false
+	}
 }
 
 func (a *AgentConn) emitError(
@@ -350,37 +426,60 @@ func (a *AgentConn) emitError(
 
 	select {
 	case a.errCh <- err:
+
+	case <-a.done:
+
 	default:
 	}
 }
 
 func (a *AgentConn) readLoop() {
-	defer close(a.events)
-	defer close(a.errCh)
+	defer func() {
+		close(a.done)
+		close(a.events)
+		close(a.errCh)
+	}()
 
 	for {
 		messageType, data, err := a.ws.ReadMessage()
 
 		if err != nil {
-			a.emitError(err)
+			if !websocket.IsCloseError(
+				err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+			) {
+				a.emitError(err)
+			}
+
 			return
 		}
 
 		now := time.Now()
 
 		if messageType == websocket.BinaryMessage {
-			a.emit(
+			if len(data) == 0 {
+				continue
+			}
+
+			if !a.emit(
 				AgentEvent{
 					Type:       EventAudioChunk,
 					Audio:      append([]byte(nil), data...),
 					ReceivedAt: now,
 				},
-			)
+			) {
+				return
+			}
 
 			continue
 		}
 
 		if messageType != websocket.TextMessage {
+			continue
+		}
+
+		if len(data) == 0 {
 			continue
 		}
 
@@ -411,6 +510,7 @@ func (a *AgentConn) readLoop() {
 			); err == nil {
 				event.Role = payload.Role
 				event.Content = payload.Content
+
 				event.Languages = append(
 					[]string(nil),
 					payload.Languages...,
@@ -423,7 +523,6 @@ func (a *AgentConn) readLoop() {
 						payload.LanguagesHinted...,
 					)
 				}
-
 			}
 
 		case EventFunctionCallRequest:
@@ -440,6 +539,8 @@ func (a *AgentConn) readLoop() {
 			}
 		}
 
-		a.emit(event)
+		if !a.emit(event) {
+			return
+		}
 	}
 }

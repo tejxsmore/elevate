@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -120,43 +121,26 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 		return conn.WriteJSON(value)
 	}
 
-	clearTwilioAudio := func() {
-		if streamSid == "" {
-			return
-		}
-
-		if err := writeJSON(
-			twilioClearMessage{
-				Event:     "clear",
-				StreamSid: streamSid,
-			},
-		); err != nil {
-			log.Printf(
-				"media_stream: call=%s clear failed: %v",
-				callID,
-				err,
-			)
-		}
-	}
-
 	stop := func() {
 		stopOnce.Do(func() {
 			close(done)
 
-			if callID != uuid.Nil {
-				if err := h.conv.MarkCallEnded(
-					ctx,
-					callID,
-				); err != nil {
-					log.Printf(
-						"media_stream: call=%s mark ended: %v",
-						callID,
-						err,
-					)
-				}
-
-				h.sessions.Stop(callID)
+			if callID == uuid.Nil {
+				return
 			}
+
+			if err := h.conv.MarkCallEnded(
+				context.Background(),
+				callID,
+			); err != nil {
+				log.Printf(
+					"media_stream: call=%s mark ended: %v",
+					callID,
+					err,
+				)
+			}
+
+			h.sessions.Stop(callID)
 		})
 	}
 
@@ -267,11 +251,13 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				&writeMu,
 				streamSid,
 				session,
+				service.NewPCMDownsampler(),
 				done,
 			)
 
 			go func(
 				activeSession *service.VoiceSession,
+				activeStreamSID string,
 			) {
 				for {
 					select {
@@ -279,10 +265,27 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 						return
 
 					case <-activeSession.Interruptions():
-						clearTwilioAudio()
+						activeSession.ClearOutboundAudio()
+
+						if err := writeJSON(
+							twilioClearMessage{
+								Event:     "clear",
+								StreamSid: activeStreamSID,
+							},
+						); err != nil {
+							log.Printf(
+								"media_stream: call=%s clear failed: %v",
+								callID,
+								err,
+							)
+							return
+						}
 					}
 				}
-			}(session)
+			}(
+				session,
+				streamSid,
+			)
 
 		case "media":
 			if session == nil ||
@@ -309,10 +312,8 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 
 			select {
 			case session.InboundAudio() <- audio:
-
 			case <-done:
 				return
-
 			case <-ctx.Done():
 				return
 			}
@@ -329,8 +330,23 @@ func pumpOutboundAudio(
 	writeMu *sync.Mutex,
 	streamSid string,
 	session *service.VoiceSession,
+	downsampler *service.PCMDownsampler,
 	done <-chan struct{},
 ) {
+	const frameSize = 160
+	const frameDuration = 20 * time.Millisecond
+
+	pending := make(
+		[]byte,
+		0,
+		frameSize*200,
+	)
+
+	ticker := time.NewTicker(
+		frameDuration,
+	)
+	defer ticker.Stop()
+
 	chunkCount := 0
 
 	for {
@@ -357,12 +373,42 @@ func pumpOutboundAudio(
 				continue
 			}
 
+			mulawAudio := downsampler.Push(
+				audio,
+			)
+
+			if len(mulawAudio) == 0 {
+				continue
+			}
+
+			pending = append(
+				pending,
+				mulawAudio...,
+			)
+
+		case <-ticker.C:
+			if len(pending) < frameSize {
+				continue
+			}
+
+			frame := make(
+				[]byte,
+				frameSize,
+			)
+
+			copy(
+				frame,
+				pending[:frameSize],
+			)
+
+			pending = pending[frameSize:]
+
 			message := twilioOutboundMedia{
 				Event:     "media",
 				StreamSid: streamSid,
 				Media: twilioOutboundMediaBody{
 					Payload: base64.StdEncoding.EncodeToString(
-						audio,
+						frame,
 					),
 				},
 			}
