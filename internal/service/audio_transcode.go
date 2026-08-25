@@ -8,33 +8,31 @@ const (
 )
 
 func linear16SampleToMulaw(sample int16) byte {
-	pcm := int(sample)
+	s := int(sample)
 	sign := byte(0)
 
-	if pcm < 0 {
+	if s < 0 {
 		sign = 0x80
-		pcm = -pcm
+		s = -s
 	}
 
-	if pcm > muLawClip {
-		pcm = muLawClip
+	if s > muLawClip {
+		s = muLawClip
 	}
 
-	pcm += muLawBias
+	s += muLawBias
 
-	exponent := byte(7)
+	exponent := 7
+	expMask := 0x4000
 
-	for expMask := 0x4000; exponent > 0; expMask >>= 1 {
-		if pcm&expMask != 0 {
-			break
-		}
-
+	for exponent > 0 && (s&expMask) == 0 {
 		exponent--
+		expMask >>= 1
 	}
 
-	mantissa := byte((pcm >> (uint(exponent) + 3)) & 0x0F)
+	mantissa := (s >> (exponent + 3)) & 0x0F
 
-	return ^(sign | (exponent << 4) | mantissa)
+	return ^(sign | byte(exponent<<4) | byte(mantissa))
 }
 
 type PCMDownsampler struct {
@@ -60,8 +58,15 @@ func (d *PCMDownsampler) Push(pcm []byte) []byte {
 		len(d.leftover)+len(pcm),
 	)
 
-	buf = append(buf, d.leftover...)
-	buf = append(buf, pcm...)
+	buf = append(
+		buf,
+		d.leftover...,
+	)
+
+	buf = append(
+		buf,
+		pcm...,
+	)
 
 	usable := len(buf) - (len(buf) % 6)
 
@@ -96,15 +101,25 @@ func (d *PCMDownsampler) Push(pcm []byte) []byte {
 				uint16(buf[i+5])<<8,
 		)
 
-		avg := int16(
-			(int32(s1) +
-				int32(s2) +
-				int32(s3)) / 3,
-		)
+		filtered := int32(s1) +
+			2*int32(s2) +
+			int32(s3)
+
+		filtered /= 4
+
+		if filtered > 32767 {
+			filtered = 32767
+		}
+
+		if filtered < -32768 {
+			filtered = -32768
+		}
 
 		out = append(
 			out,
-			linear16SampleToMulaw(avg),
+			linear16SampleToMulaw(
+				int16(filtered),
+			),
 		)
 	}
 
