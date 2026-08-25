@@ -898,18 +898,7 @@ func (v *VoiceSession) handleUserStartedSpeaking(
 	sequence := v.turnSeq
 	v.turnStartedAt = ev.ReceivedAt
 
-	shouldInterrupt :=
-		v.agentSpeaking &&
-			!v.greetingActive
-
 	v.mu.Unlock()
-
-	if shouldInterrupt {
-		select {
-		case v.interruptions <- struct{}{}:
-		default:
-		}
-	}
 
 	turnID, err := v.conv.StartTurn(
 		ctx,
@@ -946,6 +935,10 @@ func (v *VoiceSession) handleAgentAudioDone(
 	v.mu.Unlock()
 
 	if turnID == nil {
+		return nil
+	}
+
+	if started.IsZero() {
 		return nil
 	}
 
@@ -990,6 +983,8 @@ func (v *VoiceSession) persistConversationText(
 
 	turnID := v.currentTurnID
 
+	isAgentSpeaking := v.agentSpeaking
+
 	v.mu.Unlock()
 
 	speaker := models.SpeakerRoleAgent
@@ -1003,6 +998,20 @@ func (v *VoiceSession) persistConversationText(
 		speaker = models.SpeakerRoleLead
 		role = models.MessageRoleUser
 		isLead = true
+	}
+
+	if isLead &&
+		isAgentSpeaking &&
+		!isNonSubstantiveUserText(content) {
+		select {
+		case v.interruptions <- struct{}{}:
+		default:
+		}
+
+		v.mu.Lock()
+		v.agentSpeaking = false
+		v.greetingActive = false
+		v.mu.Unlock()
 	}
 
 	language := languageFromEvent(

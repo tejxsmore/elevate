@@ -108,6 +108,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 	)
 
 	done := make(chan struct{})
+	clearOutbound := make(chan struct{}, 16)
 
 	var stopOnce sync.Once
 	var writeMu sync.Mutex
@@ -148,6 +149,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 
 	for {
 		_, raw, err := conn.ReadMessage()
+
 		if err != nil {
 			return
 		}
@@ -252,6 +254,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				streamSid,
 				session,
 				service.NewPCMDownsampler(),
+				clearOutbound,
 				done,
 			)
 
@@ -266,6 +269,11 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 
 					case <-activeSession.Interruptions():
 						activeSession.ClearOutboundAudio()
+
+						select {
+						case clearOutbound <- struct{}{}:
+						default:
+						}
 
 						if err := writeJSON(
 							twilioClearMessage{
@@ -312,8 +320,10 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 
 			select {
 			case session.InboundAudio() <- audio:
+
 			case <-done:
 				return
+
 			case <-ctx.Done():
 				return
 			}
@@ -331,23 +341,58 @@ func pumpOutboundAudio(
 	streamSid string,
 	session *service.VoiceSession,
 	downsampler *service.PCMDownsampler,
+	clearOutbound <-chan struct{},
 	done <-chan struct{},
 ) {
 	const frameSize = 160
 	const frameDuration = 20 * time.Millisecond
 
-	pending := make(
-		[]byte,
-		0,
-		frameSize*200,
+	audioInput := make(
+		chan []byte,
+		1024,
 	)
+
+	go func() {
+		defer close(audioInput)
+
+		for {
+			select {
+			case <-done:
+				return
+
+			case audio, ok := <-session.OutboundAudio():
+				if !ok {
+					return
+				}
+
+				if len(audio) == 0 {
+					continue
+				}
+
+				select {
+				case audioInput <- audio:
+
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
 
 	ticker := time.NewTicker(
 		frameDuration,
 	)
+
 	defer ticker.Stop()
 
+	pending := make(
+		[]byte,
+		0,
+		frameSize*400,
+	)
+
 	chunkCount := 0
+	inputClosed := false
 
 	for {
 		select {
@@ -359,14 +404,27 @@ func pumpOutboundAudio(
 			)
 			return
 
-		case audio, ok := <-session.OutboundAudio():
+		case <-clearOutbound:
+			pending = pending[:0]
+
+			if downsampler != nil {
+				downsampler.Reset()
+			}
+
+		drainAudioInput:
+			for {
+				select {
+				case <-audioInput:
+				default:
+					break drainAudioInput
+				}
+			}
+
+		case audio, ok := <-audioInput:
 			if !ok {
-				log.Printf(
-					"media_stream: stream=%s outbound audio channel closed, chunks_sent=%d",
-					streamSid,
-					chunkCount,
-				)
-				return
+				inputClosed = true
+				audioInput = nil
+				continue
 			}
 
 			if len(audio) == 0 {
@@ -388,20 +446,19 @@ func pumpOutboundAudio(
 
 		case <-ticker.C:
 			if len(pending) < frameSize {
+				if inputClosed {
+					log.Printf(
+						"media_stream: stream=%s outbound audio drained, chunks_sent=%d",
+						streamSid,
+						chunkCount,
+					)
+					return
+				}
+
 				continue
 			}
 
-			frame := make(
-				[]byte,
-				frameSize,
-			)
-
-			copy(
-				frame,
-				pending[:frameSize],
-			)
-
-			pending = pending[frameSize:]
+			frame := pending[:frameSize]
 
 			message := twilioOutboundMedia{
 				Event:     "media",
@@ -429,6 +486,11 @@ func pumpOutboundAudio(
 				)
 				return
 			}
+
+			pending = append(
+				pending[:0],
+				pending[frameSize:]...,
+			)
 
 			chunkCount++
 		}
