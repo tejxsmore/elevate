@@ -8,29 +8,31 @@ const (
 )
 
 func linear16SampleToMulaw(sample int16) byte {
+	pcm := int(sample)
 	sign := byte(0)
-	s := int(sample)
 
-	if s < 0 {
+	if pcm < 0 {
 		sign = 0x80
-		s = -s
+		pcm = -pcm
 	}
 
-	if s > muLawClip {
-		s = muLawClip
+	if pcm > muLawClip {
+		pcm = muLawClip
 	}
 
-	s += muLawBias
+	pcm += muLawBias
 
 	exponent := byte(7)
-	expMask := 0x4000
 
-	for expMask > 0 && (s&expMask) == 0 {
+	for expMask := 0x4000; exponent > 0; expMask >>= 1 {
+		if pcm&expMask != 0 {
+			break
+		}
+
 		exponent--
-		expMask >>= 1
 	}
 
-	mantissa := byte((s >> (uint(exponent) + 3)) & 0x0F)
+	mantissa := byte((pcm >> (uint(exponent) + 3)) & 0x0F)
 
 	return ^(sign | (exponent << 4) | mantissa)
 }
@@ -52,26 +54,52 @@ func (d *PCMDownsampler) Push(pcm []byte) []byte {
 		return nil
 	}
 
-	buf := make([]byte, 0, len(d.leftover)+len(pcm))
+	buf := make(
+		[]byte,
+		0,
+		len(d.leftover)+len(pcm),
+	)
+
 	buf = append(buf, d.leftover...)
 	buf = append(buf, pcm...)
 
 	usable := len(buf) - (len(buf) % 6)
 
 	if usable == 0 {
-		d.leftover = append(d.leftover[:0], buf...)
+		d.leftover = append(
+			d.leftover[:0],
+			buf...,
+		)
+
 		return nil
 	}
 
-	out := make([]byte, 0, usable/6)
+	out := make(
+		[]byte,
+		0,
+		usable/6,
+	)
 
 	for i := 0; i < usable; i += 6 {
-		s1 := int16(uint16(buf[i]) | uint16(buf[i+1])<<8)
-		s2 := int16(uint16(buf[i+2]) | uint16(buf[i+3])<<8)
-		s3 := int16(uint16(buf[i+4]) | uint16(buf[i+5])<<8)
+		s1 := int16(
+			uint16(buf[i]) |
+				uint16(buf[i+1])<<8,
+		)
+
+		s2 := int16(
+			uint16(buf[i+2]) |
+				uint16(buf[i+3])<<8,
+		)
+
+		s3 := int16(
+			uint16(buf[i+4]) |
+				uint16(buf[i+5])<<8,
+		)
 
 		avg := int16(
-			(int32(s1) + int32(s2) + int32(s3)) / 3,
+			(int32(s1) +
+				int32(s2) +
+				int32(s3)) / 3,
 		)
 
 		out = append(
@@ -90,6 +118,7 @@ func (d *PCMDownsampler) Push(pcm []byte) []byte {
 
 func (d *PCMDownsampler) Reset() {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	d.leftover = nil
-	d.mu.Unlock()
 }

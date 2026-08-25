@@ -108,7 +108,11 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 	)
 
 	done := make(chan struct{})
-	clearOutbound := make(chan struct{}, 16)
+
+	clearOutbound := make(
+		chan struct{},
+		16,
+	)
 
 	var stopOnce sync.Once
 	var writeMu sync.Mutex
@@ -141,7 +145,9 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				)
 			}
 
-			h.sessions.Stop(callID)
+			h.sessions.Stop(
+				callID,
+			)
 		})
 	}
 
@@ -149,7 +155,6 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 
 	for {
 		_, raw, err := conn.ReadMessage()
-
 		if err != nil {
 			return
 		}
@@ -175,9 +180,8 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 			callIDText :=
 				event.Start.CustomParameters["callId"]
 
-			parsedCallID, err := uuid.Parse(
-				callIDText,
-			)
+			parsedCallID, err :=
+				uuid.Parse(callIDText)
 			if err != nil {
 				log.Printf(
 					"media_stream: invalid callId=%q: %v",
@@ -189,10 +193,11 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 
 			callID = parsedCallID
 
-			callContext, err := h.conv.GetCallContext(
-				ctx,
-				callID,
-			)
+			callContext, err :=
+				h.conv.GetCallContext(
+					ctx,
+					callID,
+				)
 			if err != nil {
 				log.Printf(
 					"media_stream: call=%s context lookup failed: %v",
@@ -209,15 +214,16 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 					*callContext.SystemPrompt
 			}
 
-			session, err = h.sessions.Start(
-				ctx,
-				service.VoiceSessionConfig{
-					CallID:       callID,
-					LeadID:       callContext.LeadID,
-					SystemPrompt: systemPrompt,
-					Language:     callContext.PreferredLanguage,
-				},
-			)
+			session, err =
+				h.sessions.Start(
+					ctx,
+					service.VoiceSessionConfig{
+						CallID:       callID,
+						LeadID:       callContext.LeadID,
+						SystemPrompt: systemPrompt,
+						Language:     callContext.PreferredLanguage,
+					},
+				)
 			if err != nil {
 				log.Printf(
 					"media_stream: call=%s start session failed: %v",
@@ -261,6 +267,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 			go func(
 				activeSession *service.VoiceSession,
 				activeStreamSID string,
+				activeCallID uuid.UUID,
 			) {
 				for {
 					select {
@@ -283,7 +290,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 						); err != nil {
 							log.Printf(
 								"media_stream: call=%s clear failed: %v",
-								callID,
+								activeCallID,
 								err,
 							)
 							return
@@ -293,6 +300,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 			}(
 				session,
 				streamSid,
+				callID,
 			)
 
 		case "media":
@@ -302,9 +310,10 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				continue
 			}
 
-			audio, err := base64.StdEncoding.DecodeString(
-				event.Media.Payload,
-			)
+			audio, err :=
+				base64.StdEncoding.DecodeString(
+					event.Media.Payload,
+				)
 			if err != nil {
 				log.Printf(
 					"media_stream: call=%s invalid audio payload: %v",
@@ -360,7 +369,8 @@ func pumpOutboundAudio(
 			case <-done:
 				return
 
-			case audio, ok := <-session.OutboundAudio():
+			case audio, ok :=
+				<-session.OutboundAudio():
 				if !ok {
 					return
 				}
@@ -394,6 +404,35 @@ func pumpOutboundAudio(
 	chunkCount := 0
 	inputClosed := false
 
+	sendFrame := func(
+		frame []byte,
+	) error {
+		message :=
+			twilioOutboundMedia{
+				Event:     "media",
+				StreamSid: streamSid,
+				Media: twilioOutboundMediaBody{
+					Payload: base64.StdEncoding.EncodeToString(
+						frame,
+					),
+				},
+			}
+
+		writeMu.Lock()
+
+		err := conn.WriteJSON(
+			message,
+		)
+
+		writeMu.Unlock()
+
+		if err == nil {
+			chunkCount++
+		}
+
+		return err
+	}
+
 	for {
 		select {
 		case <-done:
@@ -414,7 +453,14 @@ func pumpOutboundAudio(
 		drainAudioInput:
 			for {
 				select {
-				case <-audioInput:
+				case _, ok := <-audioInput:
+					if !ok {
+						inputClosed = true
+						audioInput = nil
+
+						break drainAudioInput
+					}
+
 				default:
 					break drainAudioInput
 				}
@@ -427,13 +473,15 @@ func pumpOutboundAudio(
 				continue
 			}
 
-			if len(audio) == 0 {
+			if len(audio) == 0 ||
+				downsampler == nil {
 				continue
 			}
 
-			mulawAudio := downsampler.Push(
-				audio,
-			)
+			mulawAudio :=
+				downsampler.Push(
+					audio,
+				)
 
 			if len(mulawAudio) == 0 {
 				continue
@@ -445,54 +493,55 @@ func pumpOutboundAudio(
 			)
 
 		case <-ticker.C:
-			if len(pending) < frameSize {
-				if inputClosed {
+			if len(pending) >= frameSize {
+				frame := pending[:frameSize]
+
+				if err := sendFrame(frame); err != nil {
 					log.Printf(
-						"media_stream: stream=%s outbound audio drained, chunks_sent=%d",
+						"media_stream: stream=%s write to twilio failed: %v",
 						streamSid,
-						chunkCount,
+						err,
 					)
 					return
 				}
 
+				pending = append(
+					pending[:0],
+					pending[frameSize:]...,
+				)
+
 				continue
 			}
 
-			frame := pending[:frameSize]
+			if inputClosed {
+				if len(pending) > 0 {
+					frame := make(
+						[]byte,
+						frameSize,
+					)
 
-			message := twilioOutboundMedia{
-				Event:     "media",
-				StreamSid: streamSid,
-				Media: twilioOutboundMediaBody{
-					Payload: base64.StdEncoding.EncodeToString(
+					copy(
 						frame,
-					),
-				},
-			}
+						pending,
+					)
 
-			writeMu.Lock()
+					if err := sendFrame(frame); err != nil {
+						log.Printf(
+							"media_stream: stream=%s write final frame failed: %v",
+							streamSid,
+							err,
+						)
+					}
+				}
 
-			err := conn.WriteJSON(
-				message,
-			)
-
-			writeMu.Unlock()
-
-			if err != nil {
 				log.Printf(
-					"media_stream: stream=%s write to twilio failed: %v",
+					"media_stream: stream=%s outbound audio drained, chunks_sent=%d",
 					streamSid,
-					err,
+					chunkCount,
 				)
+
 				return
 			}
-
-			pending = append(
-				pending[:0],
-				pending[frameSize:]...,
-			)
-
-			chunkCount++
 		}
 	}
 }

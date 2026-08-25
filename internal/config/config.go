@@ -74,10 +74,9 @@ type TwilioConfig struct {
 	StatusCallbackURL         string
 	WhatsAppStatusCallbackURL string
 	MediaStreamURL            string
-
-	TrialMode        bool
-	RecordingEnabled bool
-	TrialVoiceURL    string
+	TrialMode                 bool
+	RecordingEnabled          bool
+	TrialVoiceURL             string
 }
 
 type SupabaseConfig struct {
@@ -238,27 +237,27 @@ func Load() (*Config, error) {
 
 			SpeakProvider: getEnv(
 				"DEEPGRAM_SPEAK_PROVIDER",
-				"deepgram",
+				"open_ai",
 			),
 
 			SpeakModel: getEnv(
 				"DEEPGRAM_SPEAK_MODEL",
-				"aura-2-thalia-en",
+				"gpt-4o-mini-tts",
 			),
 
 			SpeakModelID: getEnv(
 				"DEEPGRAM_SPEAK_MODEL_ID",
-				"sonic-2",
+				"",
 			),
 
 			SpeakVoice: getEnv(
 				"DEEPGRAM_SPEAK_VOICE",
-				"",
+				"alloy",
 			),
 
 			SpeakLanguage: getEnv(
 				"DEEPGRAM_SPEAK_LANGUAGE",
-				"en",
+				"multi",
 			),
 
 			SpeakVersion: getEnv(
@@ -461,8 +460,12 @@ func (c *Config) validate() error {
 		)
 	}
 
-	if strings.EqualFold(c.Deepgram.SpeakProvider, "open_ai") &&
-		strings.TrimSpace(c.Deepgram.OpenAIAPIKey) == "" {
+	if strings.EqualFold(
+		c.Deepgram.SpeakProvider,
+		"open_ai",
+	) && strings.TrimSpace(
+		c.Deepgram.OpenAIAPIKey,
+	) == "" {
 		return fmt.Errorf(
 			"OPENAI_API_KEY cannot be empty when DEEPGRAM_SPEAK_PROVIDER=open_ai",
 		)
@@ -696,7 +699,6 @@ func getEnvInt(
 	parsed, err := strconv.Atoi(
 		strings.TrimSpace(value),
 	)
-
 	if err != nil {
 		return fallback
 	}
@@ -721,7 +723,6 @@ func getEnvFloat(
 		strings.TrimSpace(value),
 		64,
 	)
-
 	if err != nil {
 		return fallback
 	}
@@ -745,7 +746,6 @@ func getEnvDuration(
 	parsed, err := time.ParseDuration(
 		strings.TrimSpace(value),
 	)
-
 	if err != nil {
 		return fallback
 	}
@@ -769,7 +769,6 @@ func getEnvBool(
 	parsed, err := strconv.ParseBool(
 		strings.TrimSpace(value),
 	)
-
 	if err != nil {
 		return fallback
 	}

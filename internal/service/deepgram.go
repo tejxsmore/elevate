@@ -222,15 +222,11 @@ func (c *DeepgramAgentClient) Connect(
 			5 * time.Second,
 		)
 
-		if err := ws.WriteControl(
+		return ws.WriteControl(
 			websocket.PongMessage,
 			[]byte(appData),
 			deadline,
-		); err != nil {
-			return err
-		}
-
-		return nil
+		)
 	})
 
 	if err := conn.writeJSON(settings); err != nil {
@@ -376,26 +372,28 @@ func (a *AgentConn) Close() error {
 	var err error
 
 	a.closeOnce.Do(func() {
-		if a.ws != nil {
-			a.writeMu.Lock()
-
-			deadline := time.Now().Add(
-				2 * time.Second,
-			)
-
-			_ = a.ws.WriteControl(
-				websocket.CloseMessage,
-				websocket.FormatCloseMessage(
-					websocket.CloseNormalClosure,
-					"",
-				),
-				deadline,
-			)
-
-			a.writeMu.Unlock()
-
-			err = a.ws.Close()
+		if a.ws == nil {
+			return
 		}
+
+		a.writeMu.Lock()
+
+		deadline := time.Now().Add(
+			2 * time.Second,
+		)
+
+		_ = a.ws.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(
+				websocket.CloseNormalClosure,
+				"",
+			),
+			deadline,
+		)
+
+		a.writeMu.Unlock()
+
+		err = a.ws.Close()
 	})
 
 	return err
@@ -426,9 +424,7 @@ func (a *AgentConn) emitError(
 
 	select {
 	case a.errCh <- err:
-
 	case <-a.done:
-
 	default:
 	}
 }
@@ -442,7 +438,6 @@ func (a *AgentConn) readLoop() {
 
 	for {
 		messageType, data, err := a.ws.ReadMessage()
-
 		if err != nil {
 			if !websocket.IsCloseError(
 				err,

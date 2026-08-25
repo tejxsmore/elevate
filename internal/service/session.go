@@ -345,71 +345,35 @@ func languageName(
 
 func (v *VoiceSession) buildSpeakProvider() DeepgramProvider {
 	provider := strings.ToLower(
-		strings.TrimSpace(v.dgCfg.SpeakProvider),
+		strings.TrimSpace(
+			v.dgCfg.SpeakProvider,
+		),
 	)
 
 	if provider == "" {
 		provider = "open_ai"
 	}
 
-	speed := v.dgCfg.SpeakSpeed
+	model := strings.TrimSpace(
+		v.dgCfg.SpeakModel,
+	)
 
-	if speed <= 0 {
-		speed = 1.0
+	if model == "" {
+		model = "gpt-4o-mini-tts"
 	}
 
-	switch provider {
-	case "open_ai":
-		model := strings.TrimSpace(
-			v.dgCfg.SpeakModel,
-		)
+	voice := strings.TrimSpace(
+		v.dgCfg.SpeakVoice,
+	)
 
-		if model == "" {
-			model = "gpt-4o-mini-tts"
-		}
+	if voice == "" {
+		voice = "alloy"
+	}
 
-		voice := strings.TrimSpace(
-			v.dgCfg.SpeakVoice,
-		)
-
-		if voice == "" {
-			voice = "alloy"
-		}
-
-		return DeepgramProvider{
-			Type:  "open_ai",
-			Model: model,
-			Voice: voice,
-		}
-
-	case "cartesia":
-		return DeepgramProvider{
-			Type:    "cartesia",
-			ModelID: v.dgCfg.SpeakModelID,
-			Voice: map[string]any{
-				"mode": "id",
-				"id":   v.dgCfg.SpeakVoice,
-			},
-			Language: "multi",
-			Speed:    speed,
-		}
-
-	case "eleven_labs":
-		return DeepgramProvider{
-			Type:     "eleven_labs",
-			ModelID:  v.dgCfg.SpeakModelID,
-			Voice:    v.dgCfg.SpeakVoice,
-			Language: "multi",
-			Speed:    speed,
-		}
-
-	default:
-		return DeepgramProvider{
-			Type:    "deepgram",
-			Model:   v.dgCfg.SpeakModel,
-			Version: v.dgCfg.SpeakVersion,
-			Speed:   speed,
-		}
+	return DeepgramProvider{
+		Type:  provider,
+		Model: model,
+		Voice: voice,
 	}
 }
 
@@ -428,11 +392,6 @@ func (v *VoiceSession) buildSpeakEndpoint(
 	)
 
 	if key == "" {
-		log.Printf(
-			"voice_session: call=%s OPENAI_API_KEY is empty",
-			v.cfg.CallID,
-		)
-
 		return nil
 	}
 
@@ -444,7 +403,9 @@ func (v *VoiceSession) buildSpeakEndpoint(
 	}
 }
 
-func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
+func (v *VoiceSession) buildSettings(
+	includeGreeting bool,
+) DeepgramSettingsMessage {
 	thinkProvider := strings.TrimSpace(
 		v.cfg.ThinkProvider,
 	)
@@ -488,28 +449,21 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 	}
 
 	listenProvider := DeepgramProvider{
-		Type:  "deepgram",
-		Model: listenModel,
+		Type:          "deepgram",
+		Model:         listenModel,
+		Language:      "multi",
+		LanguageHints: v.dgCfg.LanguageHints,
 	}
 
-	agentLanguage := strings.TrimSpace(
-		v.dgCfg.ListenLanguage,
-	)
+	agentLanguage := "multi"
 
-	if agentLanguage == "" {
-		agentLanguage = languageForDeepgram(
-			v.cfg.Language,
+	speakProvider :=
+		v.buildSpeakProvider()
+
+	speakEndpoint :=
+		v.buildSpeakEndpoint(
+			speakProvider,
 		)
-	}
-
-	if agentLanguage == "" {
-		agentLanguage = "multi"
-	}
-
-	speakProvider := v.buildSpeakProvider()
-	speakEndpoint := v.buildSpeakEndpoint(
-		speakProvider,
-	)
 
 	prompt := buildSalesPrompt(
 		v.cfg.SystemPrompt,
@@ -518,7 +472,8 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 	functions := []DeepgramFunction{}
 
 	if v.functions != nil {
-		functions = v.functions.Functions()
+		functions =
+			v.functions.Functions()
 	}
 
 	thinkProviderConfig := DeepgramProvider{
@@ -526,12 +481,17 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 		Model: thinkModel,
 	}
 
-	greeting := strings.TrimSpace(
-		v.cfg.Greeting,
-	)
+	greeting := ""
 
-	if greeting == "" {
-		greeting = salesGreeting()
+	if includeGreeting {
+		greeting = strings.TrimSpace(
+			v.cfg.Greeting,
+		)
+
+		if greeting == "" {
+			greeting =
+				salesGreeting()
+		}
 	}
 
 	return DeepgramSettingsMessage{
@@ -594,7 +554,7 @@ func (v *VoiceSession) Connect(
 
 	conn, err := v.deepgram.Connect(
 		ctx,
-		v.buildSettings(),
+		v.buildSettings(true),
 	)
 	if err != nil {
 		return fmt.Errorf(
@@ -685,8 +645,9 @@ func (v *VoiceSession) Loop(
 
 		newConn, connectErr := v.deepgram.Connect(
 			ctx,
-			v.buildSettings(),
+			v.buildSettings(false),
 		)
+
 		if connectErr != nil {
 			log.Printf(
 				"voice_session: call=%s reconnect failed: %v",
@@ -1021,48 +982,6 @@ func (v *VoiceSession) persistConversationText(
 			v.cfg.Language,
 		),
 	)
-
-	if isLead {
-		inferredLanguage := inferLanguageFromText(
-			content,
-			v.cfg.Language,
-		)
-
-		if inferredLanguage != models.LanguageUnknown {
-			language = inferredLanguage
-		}
-
-		v.mu.Lock()
-		conn := v.agentConn
-		v.mu.Unlock()
-
-		if conn != nil {
-			updatedPrompt := buildSalesPrompt(
-				v.cfg.SystemPrompt,
-			)
-
-			updatedPrompt = strings.Join(
-				[]string{
-					updatedPrompt,
-					"",
-					"Current customer language:",
-					languageName(language),
-					"Match the customer's language for this response.",
-				},
-				"\n",
-			)
-
-			if err := conn.UpdatePrompt(
-				updatedPrompt,
-			); err != nil {
-				log.Printf(
-					"voice_session: call=%s update language prompt: %v",
-					v.cfg.CallID,
-					err,
-				)
-			}
-		}
-	}
 
 	if language != models.LanguageUnknown {
 		if err := v.conv.UpdateCallPrimaryLanguage(

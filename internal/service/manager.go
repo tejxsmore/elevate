@@ -68,23 +68,40 @@ func (m *VoiceSessionManager) Start(
 		)
 	}
 
-	if strings.TrimSpace(cfg.ThinkProvider) == "" {
-		cfg.ThinkProvider = m.dgCfg.ThinkProvider
+	if strings.TrimSpace(
+		cfg.ThinkProvider,
+	) == "" {
+		cfg.ThinkProvider =
+			m.dgCfg.ThinkProvider
 	}
 
-	if strings.TrimSpace(cfg.ThinkModel) == "" {
-		cfg.ThinkModel = m.dgCfg.ThinkModel
+	if strings.TrimSpace(
+		cfg.ThinkModel,
+	) == "" {
+		cfg.ThinkModel =
+			m.dgCfg.ThinkModel
 	}
 
-	if strings.TrimSpace(cfg.ListenModel) == "" {
-		cfg.ListenModel = m.dgCfg.ListenModel
+	if strings.TrimSpace(
+		cfg.ListenModel,
+	) == "" {
+		cfg.ListenModel =
+			m.dgCfg.ListenModel
 	}
 
-	if strings.TrimSpace(cfg.SpeakModel) == "" {
-		cfg.SpeakModel = m.dgCfg.SpeakModel
+	if strings.TrimSpace(
+		cfg.SpeakModel,
+	) == "" {
+		cfg.SpeakModel =
+			m.dgCfg.SpeakModel
 	}
 
-	cfg.Greeting = salesGreeting()
+	if strings.TrimSpace(
+		cfg.Greeting,
+	) == "" {
+		cfg.Greeting =
+			salesGreeting()
+	}
 
 	if strings.TrimSpace(
 		m.dgCfg.APIKey,
@@ -99,6 +116,20 @@ func (m *VoiceSessionManager) Start(
 	) == "" {
 		return nil, fmt.Errorf(
 			"voice_session_manager: Deepgram agent URL is missing",
+		)
+	}
+
+	if strings.EqualFold(
+		strings.TrimSpace(
+			m.dgCfg.SpeakProvider,
+		),
+		"open_ai",
+	) &&
+		strings.TrimSpace(
+			m.dgCfg.OpenAIAPIKey,
+		) == "" {
+		return nil, fmt.Errorf(
+			"voice_session_manager: OPENAI_API_KEY is missing",
 		)
 	}
 
@@ -169,9 +200,11 @@ func (m *VoiceSessionManager) Start(
 
 		m.mu.Lock()
 
-		current, ok := m.sessions[callID]
+		current, ok :=
+			m.sessions[callID]
 
-		if ok && current == handle {
+		if ok &&
+			current == handle {
 			delete(
 				m.sessions,
 				callID,
@@ -197,7 +230,8 @@ func (m *VoiceSessionManager) Stop(
 
 	m.mu.Lock()
 
-	handle, ok := m.sessions[callID]
+	handle, ok :=
+		m.sessions[callID]
 
 	if ok {
 		delete(
@@ -208,7 +242,8 @@ func (m *VoiceSessionManager) Stop(
 
 	m.mu.Unlock()
 
-	if ok && handle != nil {
+	if ok &&
+		handle != nil {
 		handle.cancel()
 	}
 }
