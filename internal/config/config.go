@@ -589,6 +589,10 @@ func (c *Config) Integrations() map[string]bool {
 			c.Deepgram.APIKey,
 		) != "",
 
+		"openai": strings.TrimSpace(
+			c.Deepgram.OpenAIAPIKey,
+		) != "",
+
 		"supabase": strings.TrimSpace(
 			c.Supabase.URL,
 		) != "" &&

@@ -161,22 +161,6 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 
 	defer stop()
 
-	go func() {
-		if session == nil {
-			return
-		}
-
-		for {
-			select {
-			case <-done:
-				return
-
-			case <-session.Interruptions():
-				clearTwilioAudio()
-			}
-		}
-	}()
-
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
@@ -256,6 +240,13 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				return
 			}
 
+			log.Printf(
+				"media_stream: call=%s session started stream_sid=%s call_sid=%s",
+				callID,
+				streamSid,
+				callSID,
+			)
+
 			if err := h.conv.MarkCallInProgress(
 				ctx,
 				callID,
@@ -277,6 +268,20 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 				session,
 				done,
 			)
+
+			go func(
+				activeSession *service.VoiceSession,
+			) {
+				for {
+					select {
+					case <-done:
+						return
+
+					case <-activeSession.Interruptions():
+						clearTwilioAudio()
+					}
+				}
+			}(session)
 
 		case "media":
 			if session == nil ||
@@ -321,13 +326,25 @@ func pumpOutboundAudio(
 	session *service.VoiceSession,
 	done <-chan struct{},
 ) {
+	chunkCount := 0
+
 	for {
 		select {
 		case <-done:
+			log.Printf(
+				"media_stream: stream=%s outbound pump stopped, chunks_sent=%d",
+				streamSid,
+				chunkCount,
+			)
 			return
 
 		case audio, ok := <-session.OutboundAudio():
 			if !ok {
+				log.Printf(
+					"media_stream: stream=%s outbound audio channel closed, chunks_sent=%d",
+					streamSid,
+					chunkCount,
+				)
 				return
 			}
 
@@ -354,8 +371,15 @@ func pumpOutboundAudio(
 			writeMu.Unlock()
 
 			if err != nil {
+				log.Printf(
+					"media_stream: stream=%s write to twilio failed: %v",
+					streamSid,
+					err,
+				)
 				return
 			}
+
+			chunkCount++
 		}
 	}
 }
