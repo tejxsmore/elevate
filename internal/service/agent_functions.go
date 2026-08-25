@@ -244,6 +244,188 @@ func (e *AgentFunctionExecutor) Execute(
 	}
 }
 
+func (e *AgentFunctionExecutor) ProcessUserText(
+	ctx context.Context,
+	callID uuid.UUID,
+	content string,
+	segmentID *uuid.UUID,
+) error {
+	content = strings.TrimSpace(content)
+
+	if content == "" {
+		return nil
+	}
+
+	if e == nil ||
+		e.discoveryRepo == nil ||
+		e.classificationRepo == nil ||
+		e.actionService == nil {
+		return fmt.Errorf(
+			"process_user_text: executor is not configured",
+		)
+	}
+
+	extracted := NewDiscoveryExtractor().Extract(
+		content,
+	)
+
+	var update repository.DiscoveryUpdate
+
+	if extracted.BusinessNiche != "" {
+		update.BusinessNiche = &extracted.BusinessNiche
+	}
+
+	if extracted.ProductsSold != "" {
+		update.ProductsSold = &extracted.ProductsSold
+	}
+
+	if extracted.ProductCountEstimate != "" {
+		update.ProductCountEstimate =
+			&extracted.ProductCountEstimate
+	}
+
+	if extracted.BudgetRange != "" {
+		update.BudgetRange =
+			&extracted.BudgetRange
+	}
+
+	if extracted.BudgetRawText != "" {
+		update.BudgetRawText =
+			&extracted.BudgetRawText
+	}
+
+	if extracted.Timeline != "" {
+		update.Timeline =
+			&extracted.Timeline
+	}
+
+	if extracted.TimelineRawText != "" {
+		update.TimelineRawText =
+			&extracted.TimelineRawText
+	}
+
+	update.FeaturesRequested =
+		extracted.FeaturesRequested
+
+	if extracted.HasBarrier &&
+		strings.TrimSpace(
+			extracted.BarrierDetail,
+		) != "" {
+		update.ExtraNotes =
+			&extracted.BarrierDetail
+	}
+
+	profile, err := e.discoveryRepo.Upsert(
+		ctx,
+		callID,
+		update,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"process_user_text: discovery: %w",
+			err,
+		)
+	}
+
+	if extracted.HasBarrier {
+		if err := e.discoveryRepo.AddBarrier(
+			ctx,
+			callID,
+			extracted.BarrierType,
+			extracted.BarrierDetail,
+			content,
+		); err != nil {
+			return fmt.Errorf(
+				"process_user_text: barrier: %w",
+				err,
+			)
+		}
+	}
+
+	result := NewClassifier().Classify(
+		content,
+		profile,
+		extracted.HasBarrier,
+		extracted.BarrierType,
+	)
+
+	if result.Label != models.ClassificationUnclassified {
+		_, err := e.classificationRepo.Create(
+			ctx,
+			callID,
+			result.Label,
+			result.Confidence,
+			result.Summary,
+			result.Signals,
+			segmentID,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"process_user_text: classification: %w",
+				err,
+			)
+		}
+
+		switch result.Label {
+		case models.ClassificationHot:
+			_, err := e.actionService.Ensure(
+				ctx,
+				callID,
+				models.ActionWhatsappMidCall,
+				models.TriggerIntentDetected,
+				segmentID,
+				map[string]any{
+					"classification": "hot",
+					"confidence":     result.Confidence,
+					"quote":          content,
+					"summary":        result.Summary,
+					"signals":        result.Signals,
+				},
+				fmt.Sprintf(
+					"%s:%s",
+					callID,
+					models.ActionWhatsappMidCall,
+				),
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"process_user_text: hot action: %w",
+					err,
+				)
+			}
+
+		case models.ClassificationCold:
+			_, err := e.actionService.Ensure(
+				ctx,
+				callID,
+				models.ActionWhatsappBrochure,
+				models.TriggerIntentDetected,
+				segmentID,
+				map[string]any{
+					"classification": "cold",
+					"confidence":     result.Confidence,
+					"quote":          content,
+					"summary":        result.Summary,
+					"signals":        result.Signals,
+				},
+				fmt.Sprintf(
+					"%s:%s",
+					callID,
+					models.ActionWhatsappBrochure,
+				),
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"process_user_text: cold action: %w",
+					err,
+				)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (e *AgentFunctionExecutor) updateDiscovery(
 	ctx context.Context,
 	callID uuid.UUID,
@@ -415,19 +597,17 @@ func (e *AgentFunctionExecutor) updateClassification(
 			)
 	}
 
-	input.Confidence =
-		clampConfidence(
-			input.Confidence,
-		)
+	input.Confidence = clampConfidence(
+		input.Confidence,
+	)
 
-	classification :=
-		models.ClassificationLabel(
-			strings.ToLower(
-				strings.TrimSpace(
-					input.Classification,
-				),
+	classification := models.ClassificationLabel(
+		strings.ToLower(
+			strings.TrimSpace(
+				input.Classification,
 			),
-		)
+		),
+	)
 
 	switch classification {
 	case models.ClassificationHot,
@@ -445,8 +625,7 @@ func (e *AgentFunctionExecutor) updateClassification(
 	)
 
 	if summary == "" {
-		summary =
-			"Classification updated by voice agent."
+		summary = "Classification updated by voice agent."
 	}
 
 	signals := map[string]any{
@@ -454,7 +633,7 @@ func (e *AgentFunctionExecutor) updateClassification(
 		"source":  "deepgram_function_call",
 	}
 
-	_, err := e.classificationRepo.Create(
+	item, err := e.classificationRepo.Create(
 		ctx,
 		callID,
 		classification,
@@ -471,11 +650,21 @@ func (e *AgentFunctionExecutor) updateClassification(
 			)
 	}
 
-	/*
-		The PostgreSQL trg_sync_classification
-		trigger updates the calls classification
-		columns automatically.
-	*/
+	if e.callRepo != nil {
+		if err := e.callRepo.SetClassification(
+			ctx,
+			callID,
+			classification,
+			input.Confidence,
+			item.SequenceNumber,
+		); err != nil {
+			return "",
+				fmt.Errorf(
+					"sync classification: %w",
+					err,
+				)
+		}
+	}
 
 	switch classification {
 	case models.ClassificationHot:
@@ -498,7 +687,11 @@ func (e *AgentFunctionExecutor) updateClassification(
 					"confidence":     input.Confidence,
 					"signals":        input.Signals,
 				},
-				"",
+				fmt.Sprintf(
+					"%s:%s",
+					callID,
+					models.ActionWhatsappMidCall,
+				),
 			)
 		if err != nil {
 			return "",
@@ -533,7 +726,11 @@ func (e *AgentFunctionExecutor) updateClassification(
 					"confidence":     input.Confidence,
 					"signals":        input.Signals,
 				},
-				"",
+				fmt.Sprintf(
+					"%s:%s",
+					callID,
+					models.ActionWhatsappBrochure,
+				),
 			)
 		if err != nil {
 			return "",
@@ -690,20 +887,16 @@ func (e *AgentFunctionExecutor) requestWhatsApp(
 
 	switch messageType {
 	case "mid_call_intent":
-		actionType =
-			models.ActionWhatsappMidCall
+		actionType = models.ActionWhatsappMidCall
 
 	case "brochure":
-		actionType =
-			models.ActionWhatsappBrochure
+		actionType = models.ActionWhatsappBrochure
 
 	case "resume":
-		actionType =
-			models.ActionWhatsappResume
+		actionType = models.ActionWhatsappResume
 
 	case "followup":
-		actionType =
-			models.ActionWhatsappFollowup
+		actionType = models.ActionWhatsappFollowup
 
 	default:
 		return "",

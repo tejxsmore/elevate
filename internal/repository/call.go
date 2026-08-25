@@ -327,19 +327,13 @@ func (r *CallRepo) UpdateStatusByProviderCallID(
 					'no_answer'::call_status,
 					'canceled'::call_status
 				)
-				THEN COALESCE(
-					dialed_at,
-					now()
-				)
+				THEN COALESCE(dialed_at, now())
 				ELSE dialed_at
 			END,
 
 			answered_at = CASE
 				WHEN $2::call_status = 'in_progress'::call_status
-				THEN COALESCE(
-					answered_at,
-					now()
-				)
+				THEN COALESCE(answered_at, now())
 				ELSE answered_at
 			END,
 
@@ -351,10 +345,7 @@ func (r *CallRepo) UpdateStatusByProviderCallID(
 					'no_answer'::call_status,
 					'canceled'::call_status
 				)
-				THEN COALESCE(
-					ended_at,
-					now()
-				)
+				THEN COALESCE(ended_at, now())
 				ELSE ended_at
 			END,
 
@@ -421,19 +412,13 @@ func (r *CallRepo) UpdateStatusByCallID(
 					'no_answer'::call_status,
 					'canceled'::call_status
 				)
-				THEN COALESCE(
-					dialed_at,
-					now()
-				)
+				THEN COALESCE(dialed_at, now())
 				ELSE dialed_at
 			END,
 
 			answered_at = CASE
 				WHEN $3::call_status = 'in_progress'::call_status
-				THEN COALESCE(
-					answered_at,
-					now()
-				)
+				THEN COALESCE(answered_at, now())
 				ELSE answered_at
 			END,
 
@@ -445,10 +430,7 @@ func (r *CallRepo) UpdateStatusByCallID(
 					'no_answer'::call_status,
 					'canceled'::call_status
 				)
-				THEN COALESCE(
-					ended_at,
-					now()
-				)
+				THEN COALESCE(ended_at, now())
 				ELSE ended_at
 			END,
 
@@ -527,6 +509,7 @@ func (r *CallRepo) Transcript(
 
 	for rows.Next() {
 		var segment models.CallTranscriptSegment
+		var detectedLanguages []string
 
 		if err := rows.Scan(
 			&segment.ID,
@@ -538,7 +521,7 @@ func (r *CallRepo) Transcript(
 			&segment.Speaker,
 			&segment.Text,
 			&segment.LanguageDetected,
-			&segment.DetectedLanguages,
+			&detectedLanguages,
 			&segment.Confidence,
 			&segment.IsFinal,
 			&segment.IsInterrupted,
@@ -548,6 +531,10 @@ func (r *CallRepo) Transcript(
 		); err != nil {
 			return nil, err
 		}
+
+		segment.DetectedLanguages = models.StringArray(
+			detectedLanguages,
+		)
 
 		segments = append(
 			segments,

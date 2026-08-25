@@ -102,7 +102,10 @@ func (e *ActionExecutor) Execute(
 		)
 
 	case models.ActionUpdateClassification:
-		return nil
+		return e.executeUpdateClassification(
+			ctx,
+			action,
+		)
 
 	default:
 		return fmt.Errorf(
@@ -374,8 +377,7 @@ func (e *ActionExecutor) executeFollowupWhatsApp(
 		}
 
 		if classificationErr == nil {
-			classification =
-				value.Classification
+			classification = value.Classification
 		}
 	}
 
@@ -390,28 +392,22 @@ func (e *ActionExecutor) executeFollowupWhatsApp(
 		},
 	)
 
-	assets, err := e.loadCampaignAssets(
+	payload := decodeActionPayload(
+		action.Payload,
+	)
+
+	var assets []AssetReference
+
+	assets, assetErr := e.loadCampaignAssets(
 		ctx,
 		call.CampaignID,
 		true,
 		true,
 	)
-	if err != nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: load required assets: %w",
-			err,
-		)
-	}
 
-	if len(assets) < 2 {
-		return fmt.Errorf(
-			"follow-up WhatsApp: required resume and architecture assets are not both available",
-		)
+	if assetErr != nil {
+		assets = nil
 	}
-
-	payload := decodeActionPayload(
-		action.Payload,
-	)
 
 	_, err = e.whatsapp.Send(
 		ctx,
@@ -523,6 +519,111 @@ func (e *ActionExecutor) executeResumeWhatsApp(
 			"resume WhatsApp: send: %w",
 			err,
 		)
+	}
+
+	return nil
+}
+
+func (e *ActionExecutor) executeUpdateClassification(
+	ctx context.Context,
+	action models.CallAction,
+) error {
+	if e.classification == nil {
+		return fmt.Errorf(
+			"classification repository is not configured",
+		)
+	}
+
+	payload := decodeActionPayload(
+		action.Payload,
+	)
+
+	rawClassification, ok :=
+		payload["classification"].(string)
+
+	if !ok {
+		return fmt.Errorf(
+			"classification action missing classification",
+		)
+	}
+
+	classification :=
+		models.ClassificationLabel(
+			strings.ToLower(
+				strings.TrimSpace(
+					rawClassification,
+				),
+			),
+		)
+
+	switch classification {
+	case models.ClassificationHot,
+		models.ClassificationWarm,
+		models.ClassificationCold,
+		models.ClassificationUnclassified:
+	default:
+		return fmt.Errorf(
+			"invalid classification: %s",
+			rawClassification,
+		)
+	}
+
+	confidence := 0.0
+
+	switch value := payload["confidence"].(type) {
+	case float64:
+		confidence = value
+	case float32:
+		confidence = float64(value)
+	case int:
+		confidence = float64(value)
+	}
+
+	if confidence < 0 {
+		confidence = 0
+	}
+
+	if confidence > 1 {
+		confidence = 1
+	}
+
+	summary, _ :=
+		payload["summary"].(string)
+
+	signals := map[string]any{
+		"source":  "action_executor",
+		"signals": payload["signals"],
+	}
+
+	item, err := e.classification.Create(
+		ctx,
+		action.CallID,
+		classification,
+		confidence,
+		strings.TrimSpace(summary),
+		signals,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"create classification: %w",
+			err,
+		)
+	}
+
+	if e.callRepo != nil {
+		if err := e.callRepo.SetClassification(
+			ctx,
+			action.CallID,
+			classification,
+			confidence,
+			item.SequenceNumber,
+		); err != nil {
+			return fmt.Errorf(
+				"sync call classification: %w",
+				err,
+			)
+		}
 	}
 
 	return nil
@@ -720,55 +821,45 @@ func (e *ActionExecutor) loadCampaignAssets(
 	)
 
 	if includeResume {
-		if campaign.DefaultResumeAssetID == nil {
-			return nil, fmt.Errorf(
-				"campaign %s has no default resume asset",
-				campaign.ID,
+		if campaign.DefaultResumeAssetID != nil {
+			asset, err :=
+				e.assetService.Reference(
+					ctx,
+					*campaign.DefaultResumeAssetID,
+				)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"load resume asset: %w",
+					err,
+				)
+			}
+
+			assets = append(
+				assets,
+				asset,
 			)
 		}
-
-		asset, err :=
-			e.assetService.Reference(
-				ctx,
-				*campaign.DefaultResumeAssetID,
-			)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"load resume asset: %w",
-				err,
-			)
-		}
-
-		assets = append(
-			assets,
-			asset,
-		)
 	}
 
 	if includeDiagram {
-		if campaign.DefaultDiagramAssetID == nil {
-			return nil, fmt.Errorf(
-				"campaign %s has no default architecture asset",
-				campaign.ID,
+		if campaign.DefaultDiagramAssetID != nil {
+			asset, err :=
+				e.assetService.Reference(
+					ctx,
+					*campaign.DefaultDiagramAssetID,
+				)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"load architecture asset: %w",
+					err,
+				)
+			}
+
+			assets = append(
+				assets,
+				asset,
 			)
 		}
-
-		asset, err :=
-			e.assetService.Reference(
-				ctx,
-				*campaign.DefaultDiagramAssetID,
-			)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"load architecture asset: %w",
-				err,
-			)
-		}
-
-		assets = append(
-			assets,
-			asset,
-		)
 	}
 
 	return assets, nil

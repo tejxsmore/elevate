@@ -130,7 +130,7 @@ CONVERSATION STYLE:
 - Keep spoken responses short enough for a phone conversation.
 
 LANGUAGE:
-The customer may speak English, Hindi, Telugu, Tamil, or a mixture.
+The customer may speak English, Hindi, Telugu, or a mixture.
 
 Match the language of the customer's latest message whenever possible.
 
@@ -138,7 +138,6 @@ If the customer speaks:
 - English -> respond in English
 - Hindi -> respond in Hindi
 - Telugu -> respond in Telugu
-- Tamil -> respond in Tamil
 
 If the customer mixes languages, naturally code-switch as appropriate.
 
@@ -217,9 +216,7 @@ The goal is to understand whether the customer is genuinely interested in buying
 func buildSalesPrompt(
 	customPrompt string,
 ) string {
-	customPrompt = strings.TrimSpace(
-		customPrompt,
-	)
+	customPrompt = strings.TrimSpace(customPrompt)
 
 	base := defaultSalesPrompt()
 
@@ -780,6 +777,7 @@ func (v *VoiceSession) persistConversationText(
 
 	speaker := models.SpeakerRoleAgent
 	role := models.MessageRoleAssistant
+	isLead := false
 
 	if strings.EqualFold(
 		strings.TrimSpace(ev.Role),
@@ -787,6 +785,7 @@ func (v *VoiceSession) persistConversationText(
 	) {
 		speaker = models.SpeakerRoleLead
 		role = models.MessageRoleUser
+		isLead = true
 	}
 
 	language := languageFromEvent(
@@ -816,7 +815,7 @@ func (v *VoiceSession) persistConversationText(
 		detectedLanguages = []string{}
 	}
 
-	if _, err := v.conv.InsertTranscriptSegment(
+	segmentID, err := v.conv.InsertTranscriptSegment(
 		ctx,
 		v.cfg.CallID,
 		turnID,
@@ -829,7 +828,8 @@ func (v *VoiceSession) persistConversationText(
 		true,
 		nil,
 		nil,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf(
 			"insert transcript segment: %w",
 			err,
@@ -848,6 +848,21 @@ func (v *VoiceSession) persistConversationText(
 			"insert call message: %w",
 			err,
 		)
+	}
+
+	if isLead && v.functions != nil {
+		if err := v.functions.ProcessUserText(
+			ctx,
+			v.cfg.CallID,
+			content,
+			&segmentID,
+		); err != nil {
+			log.Printf(
+				"voice_session: call=%s process user text: %v",
+				v.cfg.CallID,
+				err,
+			)
+		}
 	}
 
 	return nil
