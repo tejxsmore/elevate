@@ -490,15 +490,16 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 	}
 
 	listenProvider := DeepgramProvider{
-		Type:     "deepgram",
-		Model:    listenModel,
-		Version:  "v1",
-		Language: "multi",
-		LanguageHints: append(
-			[]string(nil),
-			v.dgCfg.LanguageHints...,
-		),
-		SmartFormat: true,
+		Type:  "deepgram",
+		Model: listenModel,
+	}
+
+	agentLanguage := strings.TrimSpace(
+		v.dgCfg.ListenLanguage,
+	)
+
+	if agentLanguage == "" {
+		agentLanguage = "multi"
 	}
 
 	speakProvider := v.buildSpeakProvider()
@@ -538,6 +539,8 @@ func (v *VoiceSession) buildSettings() DeepgramSettingsMessage {
 		},
 
 		Agent: DeepgramAgentConfig{
+			Language: agentLanguage,
+
 			Listen: DeepgramListenConfig{
 				Provider: listenProvider,
 			},

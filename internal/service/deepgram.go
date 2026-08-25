@@ -67,6 +67,7 @@ type DeepgramSpeakConfig struct {
 }
 
 type DeepgramAgentConfig struct {
+	Language string               `json:"language,omitempty"`
 	Listen   DeepgramListenConfig `json:"listen"`
 	Think    DeepgramThinkConfig  `json:"think"`
 	Speak    DeepgramSpeakConfig  `json:"speak"`
