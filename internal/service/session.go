@@ -20,6 +20,7 @@ import (
 type VoiceSessionConfig struct {
 	CallID        uuid.UUID
 	LeadID        uuid.UUID
+	CallSID       string
 	SystemPrompt  string
 	Language      models.LanguageCode
 	ThinkProvider string
@@ -35,14 +36,18 @@ type VoiceSession struct {
 	deepgram      *DeepgramAgentClient
 	conv          *repository.ConversationRepo
 	functions     *AgentFunctionExecutor
+	twilio        *TwilioClient
 	agentConn     *AgentConn
 	inboundAudio  chan []byte
 	outboundAudio chan []byte
 	interruptions chan struct{}
+	hangupSignal  chan struct{}
 
-	mu             sync.Mutex
-	agentSpeaking  bool
-	greetingActive bool
+	mu                sync.Mutex
+	agentSpeaking     bool
+	greetingActive    bool
+	voicemailDetected bool
+	hangupTriggered   bool
 
 	turnSeq       int
 	segmentSeq    int
@@ -55,6 +60,7 @@ func NewVoiceSession(
 	dgCfg config.DeepgramConfig,
 	conv *repository.ConversationRepo,
 	functions *AgentFunctionExecutor,
+	twilio *TwilioClient,
 	cfg VoiceSessionConfig,
 ) *VoiceSession {
 	return &VoiceSession{
@@ -63,9 +69,11 @@ func NewVoiceSession(
 		deepgram:       NewDeepgramAgentClient(dgCfg),
 		conv:           conv,
 		functions:      functions,
+		twilio:         twilio,
 		inboundAudio:   make(chan []byte, 1024),
 		outboundAudio:  make(chan []byte, 1024),
 		interruptions:  make(chan struct{}, 16),
+		hangupSignal:   make(chan struct{}),
 		greetingActive: true,
 	}
 }
@@ -109,6 +117,37 @@ func salesGreeting() string {
 	return "Hi, I'm calling from Elevate. We build e-commerce websites for businesses. I wanted to quickly understand what you're looking for. What kind of products do you sell?"
 }
 
+func isVoicemailSystemText(content string) bool {
+	text := strings.ToLower(content)
+
+	markers := []string{
+		"record your message",
+		"person you are trying to reach",
+		"person you're trying to reach",
+		"is not available",
+		"isn't available",
+		"leave a message",
+		"leave your message",
+		"at the tone",
+		"after the tone",
+		"after the beep",
+		"mailbox",
+		"voice mail",
+		"voicemail",
+		"cannot take your call",
+		"can't take your call",
+		"currently unavailable",
+	}
+
+	for _, m := range markers {
+		if strings.Contains(text, m) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func defaultSalesPrompt() string {
 	return strings.TrimSpace(`
 You are an AI outbound sales representative from Elevate, calling a potential customer about e-commerce website development.
@@ -148,6 +187,20 @@ Do not force English because the customer's stored profile language is English.
 Do not translate a Hindi or Telugu response into English.
 
 For mixed-language speech, naturally mirror the customer's language mix when appropriate.
+
+VOICEMAIL:
+If what you hear sounds like an automated voicemail or answering system rather
+than a person talking to you — for example phrases like "please record your
+message", "the person you are trying to reach", "is not available", "leave a
+message", "at the tone", "mailbox" — this is NOT the customer responding to
+you. Do not treat it as a question or comment from a person, and do not say
+things like "how can I help you" or "let me know if there's anything else."
+
+Instead, immediately leave one short, natural voicemail message in character
+as an Elevate sales rep, for example: "Hi, this is Elevate — we build
+e-commerce websites for businesses. Sorry we missed you, we'll try you again
+soon." Then stop. Do not ask a question, do not continue discovery, and do
+not wait for a reply after this message.
 
 CONVERSATION STYLE:
 - Sound like a confident human sales representative.
@@ -777,6 +830,9 @@ func (v *VoiceSession) runOnce(
 		case <-ctx.Done():
 			return ctx.Err()
 
+		case <-v.hangupSignal:
+			return nil
+
 		case err, ok := <-conn.Errors():
 			if !ok || err == nil {
 				return nil
@@ -915,8 +971,13 @@ func (v *VoiceSession) handleAgentAudioDone(
 	turnID := v.currentTurnID
 	started := v.turnStartedAt
 	sequence := v.turnSeq
+	voicemail := v.voicemailDetected
 
 	v.mu.Unlock()
+
+	if voicemail {
+		v.requestHangup(ctx)
+	}
 
 	if turnID == nil {
 		return nil
@@ -945,6 +1006,55 @@ func (v *VoiceSession) handleAgentAudioDone(
 		models.LatencyFullTurn,
 		latency,
 	)
+}
+
+func (v *VoiceSession) requestHangup(
+	ctx context.Context,
+) {
+	v.mu.Lock()
+
+	if v.hangupTriggered {
+		v.mu.Unlock()
+		return
+	}
+
+	v.hangupTriggered = true
+
+	v.mu.Unlock()
+
+	go func() {
+		select {
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
+
+		if v.twilio == nil || strings.TrimSpace(v.cfg.CallSID) == "" {
+			log.Printf(
+				"voice_session: call=%s cannot hang up after voicemail: Twilio client or call SID missing",
+				v.cfg.CallID,
+			)
+		} else {
+			hangupCtx, cancel := context.WithTimeout(
+				context.Background(),
+				10*time.Second,
+			)
+
+			if err := v.twilio.HangupCall(
+				hangupCtx,
+				v.cfg.CallSID,
+			); err != nil {
+				log.Printf(
+					"voice_session: call=%s hang up after voicemail: %v",
+					v.cfg.CallID,
+					err,
+				)
+			}
+
+			cancel()
+		}
+
+		close(v.hangupSignal)
+	}()
 }
 
 func (v *VoiceSession) persistConversationText(
@@ -984,9 +1094,18 @@ func (v *VoiceSession) persistConversationText(
 		isLead = true
 	}
 
+	isVoicemail := isLead && isVoicemailSystemText(content)
+
+	if isVoicemail {
+		v.mu.Lock()
+		v.voicemailDetected = true
+		v.mu.Unlock()
+	}
+
 	if isLead &&
 		isAgentSpeaking &&
-		!isNonSubstantiveUserText(content) {
+		!isNonSubstantiveUserText(content) &&
+		!isVoicemail {
 		select {
 		case v.interruptions <- struct{}{}:
 		default:
@@ -1065,7 +1184,8 @@ func (v *VoiceSession) persistConversationText(
 
 	if isLead &&
 		v.functions != nil &&
-		!isNonSubstantiveUserText(content) {
+		!isNonSubstantiveUserText(content) &&
+		!isVoicemail {
 		if err := v.functions.ProcessUserText(
 			ctx,
 			v.cfg.CallID,

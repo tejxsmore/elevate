@@ -138,6 +138,7 @@ func New(
 			cfg.Deepgram,
 			conversationRepo,
 			agentFunctionExecutor,
+			twilioClient,
 		)
 
 	recordingService, err :=

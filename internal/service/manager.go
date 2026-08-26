@@ -22,6 +22,7 @@ type VoiceSessionManager struct {
 	dgCfg     config.DeepgramConfig
 	conv      *repository.ConversationRepo
 	functions *AgentFunctionExecutor
+	twilio    *TwilioClient
 
 	mu       sync.Mutex
 	sessions map[uuid.UUID]*sessionHandle
@@ -31,11 +32,13 @@ func NewVoiceSessionManager(
 	dgCfg config.DeepgramConfig,
 	conv *repository.ConversationRepo,
 	functions *AgentFunctionExecutor,
+	twilio *TwilioClient,
 ) *VoiceSessionManager {
 	return &VoiceSessionManager{
 		dgCfg:     dgCfg,
 		conv:      conv,
 		functions: functions,
+		twilio:    twilio,
 		sessions:  make(map[uuid.UUID]*sessionHandle),
 	}
 }
@@ -65,6 +68,13 @@ func (m *VoiceSessionManager) Start(
 	if m.functions == nil {
 		return nil, fmt.Errorf(
 			"voice_session_manager: function executor is nil",
+		)
+	}
+
+	if strings.TrimSpace(cfg.CallSID) == "" {
+		log.Printf(
+			"voice_session_manager: call=%s starting without a CallSID — voicemail hangup will not be able to end the call",
+			cfg.CallID,
 		)
 	}
 
@@ -141,6 +151,7 @@ func (m *VoiceSessionManager) Start(
 		m.dgCfg,
 		m.conv,
 		m.functions,
+		m.twilio,
 		cfg,
 	)
 

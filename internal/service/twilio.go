@@ -458,3 +458,95 @@ func (c *TwilioClient) SendWhatsApp(
 
 	return out.SID, nil
 }
+
+func (c *TwilioClient) HangupCall(
+	ctx context.Context,
+	callSID string,
+) error {
+	if c == nil {
+		return fmt.Errorf(
+			"twilio: client is nil",
+		)
+	}
+
+	if strings.TrimSpace(c.AccountSID) == "" ||
+		strings.TrimSpace(c.AuthToken) == "" {
+		return fmt.Errorf(
+			"twilio: missing credentials",
+		)
+	}
+
+	callSID = strings.TrimSpace(callSID)
+
+	if callSID == "" {
+		return fmt.Errorf(
+			"twilio: missing call SID",
+		)
+	}
+
+	endpoint := fmt.Sprintf(
+		"https://api.twilio.com/2010-04-01/Accounts/%s/Calls/%s.json",
+		c.AccountSID,
+		callSID,
+	)
+
+	form := url.Values{}
+	form.Set("Status", "completed")
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"twilio: build hangup request: %w",
+			err,
+		)
+	}
+
+	req.SetBasicAuth(
+		c.AccountSID,
+		c.AuthToken,
+	)
+
+	req.Header.Set(
+		"Content-Type",
+		"application/x-www-form-urlencoded",
+	)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf(
+			"twilio: hangup request failed: %w",
+			err,
+		)
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf(
+			"twilio: read hangup response: %w",
+			err,
+		)
+	}
+
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		var out twilioCallResponse
+
+		_ = json.Unmarshal(body, &out)
+
+		return fmt.Errorf(
+			"twilio: hangup %d %s (code %d, more info: %s)",
+			resp.StatusCode,
+			strings.TrimSpace(out.Message),
+			out.Code,
+			strings.TrimSpace(out.MoreInfo),
+		)
+	}
+
+	return nil
+}

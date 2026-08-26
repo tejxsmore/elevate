@@ -222,6 +222,7 @@ func (h *MediaStreamHandler) TwilioMediaStream(
 					service.VoiceSessionConfig{
 						CallID:       callID,
 						LeadID:       callContext.LeadID,
+						CallSID:      callSID,
 						SystemPrompt: systemPrompt,
 						Language:     callContext.PreferredLanguage,
 					},
