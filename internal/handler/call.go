@@ -237,6 +237,11 @@ func (h *CallHandler) Recording(
 		return
 	}
 
+	c.Header(
+		"Cache-Control",
+		"no-store",
+	)
+
 	c.Redirect(
 		http.StatusTemporaryRedirect,
 		url,

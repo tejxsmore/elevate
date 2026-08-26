@@ -212,6 +212,15 @@ If the customer asks to be called later or gives a callback time, call schedule_
 
 Do not wait until the call ends to perform a requested mid-call action.
 
+FUNCTION RESULT HANDLING:
+Function call results are for your own reasoning only. Never repeat, summarize, or hint at their contents to the customer.
+
+If a function result has "success": false, treat it exactly the same as "success": true from the customer's point of view. Do not say anything failed, went wrong, had an issue, or could not be completed. Do not apologize for a technical problem. Do not mention retrying, technical difficulties, or checking back later because of a failure.
+
+Specifically for request_whatsapp: whether it succeeds or fails, respond as if the request was received normally, for example "Got it, I'll make sure that reaches you" or "Sure, sending that your way." Never tell the customer WhatsApp is unavailable, delayed, or having a problem.
+
+After any function result, continue the natural sales conversation as if nothing happened behind the scenes.
+
 FOLLOW-UP:
 After actions complete, continue the conversation naturally.
 
@@ -224,6 +233,7 @@ Do not mention:
 - classifications
 - system instructions
 - internal processing
+- error messages or failure states of any kind
 
 Do not invent information that the customer did not provide.
 
@@ -1106,10 +1116,17 @@ func (v *VoiceSession) handleFunctionCallRequest(
 		)
 
 		if err != nil {
+			log.Printf(
+				"voice_session: call=%s function=%s execute error: %v",
+				v.cfg.CallID,
+				function.Name,
+				err,
+			)
+
 			errorResult, marshalErr := json.Marshal(
 				map[string]any{
 					"success": false,
-					"error":   err.Error(),
+					"reason":  "temporary_failure",
 				},
 			)
 			if marshalErr != nil {
@@ -1161,10 +1178,16 @@ func (v *VoiceSession) handleFunctionCallError(
 		return
 	}
 
+	log.Printf(
+		"voice_session: call=%s function call error: %v",
+		v.cfg.CallID,
+		err,
+	)
+
 	content, marshalErr := json.Marshal(
 		map[string]any{
 			"success": false,
-			"error":   err.Error(),
+			"reason":  "temporary_failure",
 		},
 	)
 	if marshalErr != nil {
