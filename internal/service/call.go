@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -53,6 +54,38 @@ type TriggerCallInput struct {
 	Name              *string
 	PreferredLanguage *string
 	CampaignID        *uuid.UUID
+}
+
+var ErrInvalidPhoneE164 = errors.New(
+	"invalid phone number: must be E.164 format",
+)
+
+var e164Pattern = regexp.MustCompile(
+	`^\+[1-9]\d{7,14}$`,
+)
+
+func normalizePhoneE164(
+	raw string,
+) (string, error) {
+	var b strings.Builder
+
+	for _, r := range raw {
+		if r == '+' || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+
+	cleaned := b.String()
+
+	if !e164Pattern.MatchString(cleaned) {
+		return "", fmt.Errorf(
+			"%w: %q",
+			ErrInvalidPhoneE164,
+			raw,
+		)
+	}
+
+	return cleaned, nil
 }
 
 func normalizeRequestedLanguage(
@@ -119,6 +152,13 @@ func (s *CallService) TriggerCall(
 		)
 	}
 
+	phone, err := normalizePhoneE164(
+		in.PhoneE164,
+	)
+	if err != nil {
+		return models.Call{}, err
+	}
+
 	lang := models.LanguageUnknown
 
 	if in.PreferredLanguage != nil &&
@@ -138,7 +178,7 @@ func (s *CallService) TriggerCall(
 
 	lead, err := s.leads.Upsert(
 		ctx,
-		in.PhoneE164,
+		phone,
 		in.Name,
 		lang,
 		nil,
@@ -222,7 +262,7 @@ func (s *CallService) TriggerCall(
 	)
 
 	params := TwilioCallParams{
-		To:                in.PhoneE164,
+		To:                phone,
 		From:              s.cfg.Twilio.VoiceNumber,
 		StatusCallbackURL: statusURL,
 		StatusCallbackEvents: []string{

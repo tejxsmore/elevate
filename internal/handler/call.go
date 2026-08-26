@@ -69,6 +69,18 @@ func (h *CallHandler) Trigger(
 		},
 	)
 	if err != nil {
+		if errors.Is(
+			err,
+			service.ErrInvalidPhoneE164,
+		) {
+			jsonError(
+				c,
+				http.StatusBadRequest,
+				err.Error(),
+			)
+			return
+		}
+
 		jsonError(
 			c,
 			http.StatusBadGateway,
