@@ -687,28 +687,19 @@ func (e *ActionExecutor) executeScheduleCallback(
 		payload.Timezone = "Asia/Kolkata"
 	}
 
-	existing, err :=
-		e.callbackRepo.GetByActionID(
-			ctx,
-			action.ID,
-		)
+	_, err := e.callbackRepo.GetByActionID(
+		ctx,
+		action.ID,
+	)
 
 	if err == nil {
-		switch existing.Status {
-		case models.CallbackScheduled,
-			models.CallbackNeedsConfirmation,
-			models.CallbackCompleted,
-			models.CallbackCanceled,
-			models.CallbackMissed:
-			return nil
-		}
+		return nil
 	}
 
-	if err != nil &&
-		!errors.Is(
-			err,
-			pgx.ErrNoRows,
-		) {
+	if !errors.Is(
+		err,
+		pgx.ErrNoRows,
+	) {
 		return fmt.Errorf(
 			"callback action: lookup existing callback: %w",
 			err,

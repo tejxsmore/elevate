@@ -843,10 +843,7 @@ func (e *AgentFunctionExecutor) scheduleCallback(
 	)
 
 	if rawQuote == "" {
-		return "",
-			fmt.Errorf(
-				"schedule_callback: raw_quote is empty",
-			)
+		rawQuote = requested
 	}
 
 	timezone := strings.TrimSpace(
@@ -868,7 +865,11 @@ func (e *AgentFunctionExecutor) scheduleCallback(
 			"timezone":       timezone,
 			"quote":          rawQuote,
 		},
-		"",
+		fmt.Sprintf(
+			"%s:%s",
+			callID,
+			models.ActionScheduleCallback,
+		),
 	)
 	if err != nil {
 		return "",
@@ -963,7 +964,11 @@ func (e *AgentFunctionExecutor) requestWhatsApp(
 			"reason":       reason,
 			"message_type": messageType,
 		},
-		"",
+		fmt.Sprintf(
+			"%s:%s",
+			callID,
+			actionType,
+		),
 	)
 	if err != nil {
 		return "",

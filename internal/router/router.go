@@ -176,6 +176,7 @@ func New(
 
 	callbackHandler := handler.NewCallbackHandler(
 		callbackRepo,
+		callRepo,
 	)
 
 	assetHandler := handler.NewAssetHandler(
@@ -269,6 +270,11 @@ func New(
 				campaignHandler.Get,
 			)
 
+			campaigns.PUT(
+				"/:id",
+				campaignHandler.Update,
+			)
+
 			campaigns.PATCH(
 				"/:id/assets",
 				campaignHandler.UpdateAssets,
@@ -356,6 +362,11 @@ func New(
 				"",
 				callbackHandler.List,
 			)
+
+			callbacks.POST(
+				"",
+				callbackHandler.Create,
+			)
 		}
 	}
 
@@ -435,26 +446,27 @@ func requestLogger() gin.HandlerFunc {
 	}
 }
 
-func corsMiddleware(
-	allowedOrigin string,
-) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		origin := strings.TrimSpace(
-			allowedOrigin,
-		)
+func corsMiddleware(allowedOrigins string) gin.HandlerFunc {
+	origins := make(map[string]bool)
 
-		if origin == "" {
-			origin = "*"
+	for _, o := range strings.Split(allowedOrigins, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			origins[o] = true
+		}
+	}
+
+	return func(c *gin.Context) {
+		origin := c.Request.Header.Get("Origin")
+
+		if origins[origin] {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
 		}
 
 		c.Header(
-			"Access-Control-Allow-Origin",
-			origin,
-		)
-
-		c.Header(
 			"Access-Control-Allow-Methods",
-			"GET, POST, PATCH, DELETE, OPTIONS",
+			"GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		)
 
 		c.Header(
@@ -462,11 +474,13 @@ func corsMiddleware(
 			"Content-Type, Authorization",
 		)
 
-		if c.Request.Method ==
-			http.MethodOptions {
-			c.AbortWithStatus(
-				http.StatusNoContent,
-			)
+		c.Header(
+			"Access-Control-Allow-Credentials",
+			"true",
+		)
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 

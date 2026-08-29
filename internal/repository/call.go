@@ -161,6 +161,8 @@ func (r *CallRepo) Get(
 type CallSummary struct {
 	ID                    uuid.UUID                  `json:"id"`
 	LeadID                uuid.UUID                  `json:"lead_id"`
+	LeadName              *string                    `json:"lead_name,omitempty"`
+	LeadPhoneE164         string                     `json:"lead_phone_e164"`
 	CampaignID            *uuid.UUID                 `json:"campaign_id,omitempty"`
 	Status                models.CallStatus          `json:"status"`
 	CurrentClassification models.ClassificationLabel `json:"current_classification"`
@@ -183,21 +185,25 @@ func (r *CallRepo) List(
 		ctx,
 		`
 		SELECT
-			id,
-			lead_id,
-			campaign_id,
-			status,
-			current_classification,
-			primary_language,
-			direction,
-			attempt_number,
-			queued_at,
-			dialed_at,
-			answered_at,
-			ended_at,
-			created_at
-		FROM calls
-		ORDER BY created_at DESC
+			c.id,
+			c.lead_id,
+			l.name,
+			l.phone_e164,
+			c.campaign_id,
+			c.status,
+			c.current_classification,
+			c.primary_language,
+			c.direction,
+			c.attempt_number,
+			c.queued_at,
+			c.dialed_at,
+			c.answered_at,
+			c.ended_at,
+			c.created_at
+		FROM calls c
+		JOIN leads l
+			ON l.id = c.lead_id
+		ORDER BY c.created_at DESC
 		LIMIT $1
 		OFFSET $2
 		`,
@@ -222,6 +228,8 @@ func (r *CallRepo) List(
 		if err := rows.Scan(
 			&call.ID,
 			&call.LeadID,
+			&call.LeadName,
+			&call.LeadPhoneE164,
 			&call.CampaignID,
 			&call.Status,
 			&call.CurrentClassification,

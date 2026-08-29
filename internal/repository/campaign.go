@@ -185,6 +185,129 @@ func (r *CampaignRepo) Create(
 			$7,
 			$8
 		)
+		ON CONFLICT (campaign_id, version) DO NOTHING
+		`,
+		campaign.ID,
+		campaign.Version,
+		campaign.SystemPrompt,
+		campaign.VoiceConfig,
+		campaign.WhatsappTemplates,
+		campaign.DefaultResumeAssetID,
+		campaign.DefaultDiagramAssetID,
+		campaign.AgentPhoneNumber,
+	)
+	if err != nil {
+		return models.Campaign{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return models.Campaign{}, err
+	}
+
+	return campaign, nil
+}
+
+func (r *CampaignRepo) Update(
+	ctx context.Context,
+	id uuid.UUID,
+	name string,
+	systemPrompt *string,
+	voiceConfig json.RawMessage,
+	waTemplates json.RawMessage,
+	agentPhoneNumber *string,
+	active bool,
+) (models.Campaign, error) {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return models.Campaign{}, err
+	}
+
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	var campaign models.Campaign
+
+	err = tx.QueryRow(
+		ctx,
+		`
+		UPDATE campaigns
+		SET
+			name = $2,
+			system_prompt = $3,
+			voice_config = $4,
+			whatsapp_templates = $5,
+			agent_phone_number = $6,
+			active = $7,
+			version = version + 1,
+			updated_at = now()
+		WHERE id = $1
+		  AND archived_at IS NULL
+		RETURNING
+			id,
+			name,
+			system_prompt,
+			voice_config,
+			whatsapp_templates,
+			default_resume_asset_id,
+			default_diagram_asset_id,
+			agent_phone_number,
+			active,
+			version,
+			archived_at,
+			created_at,
+			updated_at
+		`,
+		id,
+		name,
+		systemPrompt,
+		voiceConfig,
+		waTemplates,
+		agentPhoneNumber,
+		active,
+	).Scan(
+		&campaign.ID,
+		&campaign.Name,
+		&campaign.SystemPrompt,
+		&campaign.VoiceConfig,
+		&campaign.WhatsappTemplates,
+		&campaign.DefaultResumeAssetID,
+		&campaign.DefaultDiagramAssetID,
+		&campaign.AgentPhoneNumber,
+		&campaign.Active,
+		&campaign.Version,
+		&campaign.ArchivedAt,
+		&campaign.CreatedAt,
+		&campaign.UpdatedAt,
+	)
+	if err != nil {
+		return models.Campaign{}, err
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`
+		INSERT INTO campaign_versions (
+			campaign_id,
+			version,
+			system_prompt,
+			voice_config,
+			whatsapp_templates,
+			default_resume_asset_id,
+			default_diagram_asset_id,
+			agent_phone_number
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			$6,
+			$7,
+			$8
+		)
+		ON CONFLICT (campaign_id, version) DO NOTHING
 		`,
 		campaign.ID,
 		campaign.Version,

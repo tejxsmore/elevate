@@ -603,6 +603,28 @@ func (r *CallbackRepo) MarkCanceled(
 	return err
 }
 
+func (r *CallRepo) ActiveCampaignID(
+	ctx context.Context,
+) (uuid.UUID, error) {
+	var campaignID uuid.UUID
+
+	err := r.db.Pool.QueryRow(
+		ctx,
+		`
+		SELECT id
+		FROM campaigns
+		WHERE active = true
+		  AND archived_at IS NULL
+		ORDER BY updated_at DESC
+		LIMIT 1
+		`,
+	).Scan(
+		&campaignID,
+	)
+
+	return campaignID, err
+}
+
 func (r *CallbackRepo) List(
 	ctx context.Context,
 ) ([]CallbackSummary, error) {
