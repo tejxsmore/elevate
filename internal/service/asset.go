@@ -19,10 +19,10 @@ import (
 )
 
 type AssetService struct {
-	cfg     *config.Config
-	repo    *repository.AssetRepo
-	s3      *s3.Client
-	presign *s3.PresignClient
+	cfg       *config.Config
+	repo      *repository.AssetRepo
+	campaigns *repository.CampaignRepo
+	s3        *s3.Client
 }
 
 type AssetReference struct {
@@ -30,24 +30,24 @@ type AssetReference struct {
 	URL   string
 }
 
+type AssetObject struct {
+	Asset         models.Asset
+	Body          io.ReadCloser
+	ContentType   string
+	ContentLength int64
+}
+
 func NewAssetService(
 	cfg *config.Config,
 	repo *repository.AssetRepo,
+	campaigns *repository.CampaignRepo,
 	s3Client *s3.Client,
 ) *AssetService {
-	var presign *s3.PresignClient
-
-	if s3Client != nil {
-		presign = s3.NewPresignClient(
-			s3Client,
-		)
-	}
-
 	return &AssetService{
-		cfg:     cfg,
-		repo:    repo,
-		s3:      s3Client,
-		presign: presign,
+		cfg:       cfg,
+		repo:      repo,
+		campaigns: campaigns,
+		s3:        s3Client,
 	}
 }
 
@@ -102,16 +102,13 @@ func (s *AssetService) Upload(
 			path.Ext(filename),
 		)
 
-		if value := mime.TypeByExtension(
-			ext,
-		); value != "" {
+		if value := mime.TypeByExtension(ext); value != "" {
 			contentType = value
 		}
 	}
 
 	if contentType == "" {
-		contentType =
-			"application/octet-stream"
+		contentType = "application/octet-stream"
 	}
 
 	if s.s3 == nil ||
@@ -149,6 +146,7 @@ func (s *AssetService) Upload(
 			ContentType: aws.String(
 				contentType,
 			),
+			ContentLength: aws.Int64(size),
 		},
 	)
 	if err != nil {
@@ -168,6 +166,26 @@ func (s *AssetService) Upload(
 		&size,
 	)
 	if err != nil {
+		_, deleteErr := s.s3.DeleteObject(
+			ctx,
+			&s3.DeleteObjectInput{
+				Bucket: aws.String(
+					s.cfg.AWS.S3Bucket,
+				),
+				Key: aws.String(
+					objectKey,
+				),
+			},
+		)
+
+		if deleteErr != nil {
+			return models.Asset{}, fmt.Errorf(
+				"create asset record: %w; cleanup uploaded S3 object: %v",
+				err,
+				deleteErr,
+			)
+		}
+
 		return models.Asset{}, fmt.Errorf(
 			"create asset record: %w",
 			err,
@@ -207,28 +225,14 @@ func (s *AssetService) List(
 	)
 }
 
-func (s *AssetService) Delete(
+func (s *AssetService) Open(
 	ctx context.Context,
 	id uuid.UUID,
-) error {
-	if s == nil || s.repo == nil {
-		return fmt.Errorf(
-			"asset service is not configured",
-		)
-	}
-
-	return s.repo.Delete(
-		ctx,
-		id,
-	)
-}
-
-func (s *AssetService) Reference(
-	ctx context.Context,
-	id uuid.UUID,
-) (AssetReference, error) {
-	if s == nil || s.repo == nil {
-		return AssetReference{}, fmt.Errorf(
+) (AssetObject, error) {
+	if s == nil ||
+		s.repo == nil ||
+		s.s3 == nil {
+		return AssetObject{}, fmt.Errorf(
 			"asset service is not configured",
 		)
 	}
@@ -238,32 +242,26 @@ func (s *AssetService) Reference(
 		id,
 	)
 	if err != nil {
-		return AssetReference{}, err
+		return AssetObject{}, err
 	}
 
-	url, err := s.URL(
-		ctx,
-		asset,
-		15*time.Minute,
-	)
-	if err != nil {
-		return AssetReference{}, err
+	if strings.ToLower(
+		strings.TrimSpace(
+			asset.StorageProvider,
+		),
+	) != "s3" {
+		return AssetObject{}, fmt.Errorf(
+			"unsupported asset storage provider: %s",
+			asset.StorageProvider,
+		)
 	}
 
-	return AssetReference{
-		Asset: asset,
-		URL:   url,
-	}, nil
-}
-
-func (s *AssetService) URL(
-	ctx context.Context,
-	asset models.Asset,
-	expires time.Duration,
-) (string, error) {
-	if asset.ID == uuid.Nil {
-		return "", fmt.Errorf(
-			"asset ID is empty",
+	if s.cfg == nil ||
+		strings.TrimSpace(
+			s.cfg.AWS.S3Bucket,
+		) == "" {
+		return AssetObject{}, fmt.Errorf(
+			"S3 asset storage is not configured",
 		)
 	}
 
@@ -275,9 +273,105 @@ func (s *AssetService) URL(
 	)
 
 	if storagePath == "" {
-		return "", fmt.Errorf(
+		return AssetObject{}, fmt.Errorf(
 			"asset storage path is empty",
 		)
+	}
+
+	object, err := s.s3.GetObject(
+		ctx,
+		&s3.GetObjectInput{
+			Bucket: aws.String(
+				s.cfg.AWS.S3Bucket,
+			),
+			Key: aws.String(
+				storagePath,
+			),
+		},
+	)
+	if err != nil {
+		return AssetObject{}, fmt.Errorf(
+			"get asset from S3: %w",
+			err,
+		)
+	}
+
+	contentType := "application/octet-stream"
+
+	if asset.MimeType != nil &&
+		strings.TrimSpace(
+			*asset.MimeType,
+		) != "" {
+		contentType = strings.TrimSpace(
+			*asset.MimeType,
+		)
+	} else if object.ContentType != nil &&
+		strings.TrimSpace(
+			*object.ContentType,
+		) != "" {
+		contentType = strings.TrimSpace(
+			*object.ContentType,
+		)
+	}
+
+	contentLength := int64(-1)
+
+	if object.ContentLength != nil {
+		contentLength = *object.ContentLength
+	} else if asset.SizeBytes != nil {
+		contentLength = *asset.SizeBytes
+	}
+
+	return AssetObject{
+		Asset:         asset,
+		Body:          object.Body,
+		ContentType:   contentType,
+		ContentLength: contentLength,
+	}, nil
+}
+
+func (s *AssetService) Delete(
+	ctx context.Context,
+	id uuid.UUID,
+) error {
+	if s == nil ||
+		s.repo == nil {
+		return fmt.Errorf(
+			"asset service is not configured",
+		)
+	}
+
+	asset, err := s.repo.Get(
+		ctx,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+
+	storagePath := strings.TrimLeft(
+		strings.TrimSpace(
+			asset.StoragePath,
+		),
+		"/",
+	)
+
+	if storagePath == "" {
+		return fmt.Errorf(
+			"asset storage path is empty",
+		)
+	}
+
+	if s.campaigns != nil {
+		if err := s.campaigns.ClearAssetReference(
+			ctx,
+			id,
+		); err != nil {
+			return fmt.Errorf(
+				"detach asset from campaigns: %w",
+				err,
+			)
+		}
 	}
 
 	switch strings.ToLower(
@@ -286,90 +380,113 @@ func (s *AssetService) URL(
 		),
 	) {
 	case "s3":
-		if s == nil ||
+		if s.s3 == nil ||
 			s.cfg == nil ||
 			strings.TrimSpace(
 				s.cfg.AWS.S3Bucket,
 			) == "" {
-			return "", fmt.Errorf(
+			return fmt.Errorf(
 				"S3 asset storage is not configured",
 			)
 		}
 
-		if s.presign == nil {
-			return "", fmt.Errorf(
-				"S3 presigner is not configured",
-			)
-		}
-
-		if expires <= 0 {
-			expires = 15 * time.Minute
-		}
-
-		request, err :=
-			s.presign.PresignGetObject(
-				ctx,
-				&s3.GetObjectInput{
-					Bucket: aws.String(
-						s.cfg.AWS.S3Bucket,
-					),
-					Key: aws.String(
-						storagePath,
-					),
-				},
-				func(
-					options *s3.PresignOptions,
-				) {
-					options.Expires = expires
-				},
-			)
+		_, err := s.s3.DeleteObject(
+			ctx,
+			&s3.DeleteObjectInput{
+				Bucket: aws.String(
+					s.cfg.AWS.S3Bucket,
+				),
+				Key: aws.String(
+					storagePath,
+				),
+			},
+		)
 		if err != nil {
-			return "", fmt.Errorf(
-				"presign S3 asset: %w",
+			return fmt.Errorf(
+				"delete asset from S3: %w",
 				err,
 			)
 		}
 
-		return request.URL, nil
-
 	case "supabase":
-		if s == nil ||
-			s.cfg == nil ||
-			strings.TrimSpace(
-				s.cfg.Supabase.URL,
-			) == "" ||
-			strings.TrimSpace(
-				s.cfg.Supabase.StorageBucket,
-			) == "" {
-			return "", fmt.Errorf(
-				"Supabase asset storage is not configured",
-			)
-		}
-
-		return fmt.Sprintf(
-			"%s/storage/v1/object/public/%s/%s",
-			strings.TrimRight(
-				s.cfg.Supabase.URL,
-				"/",
-			),
-			s.cfg.Supabase.StorageBucket,
-			storagePath,
-		), nil
+		return fmt.Errorf(
+			"deleting Supabase assets is not supported",
+		)
 
 	default:
-		return "", fmt.Errorf(
+		return fmt.Errorf(
 			"unsupported asset storage provider: %s",
 			asset.StorageProvider,
 		)
 	}
+
+	if err := s.repo.Delete(
+		ctx,
+		id,
+	); err != nil {
+		return fmt.Errorf(
+			"delete asset record: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
+func (s *AssetService) AttachedCampaigns(
+	ctx context.Context,
+	id uuid.UUID,
+) ([]repository.CampaignSummary, error) {
+	if s == nil ||
+		s.campaigns == nil {
+		return nil, fmt.Errorf(
+			"asset service is not configured",
+		)
+	}
+
+	return s.campaigns.FindByAssetID(
+		ctx,
+		id,
+	)
+}
+
+func (s *AssetService) Reference(
+	ctx context.Context,
+	id uuid.UUID,
+) (AssetReference, error) {
+	asset, err := s.repo.Get(
+		ctx,
+		id,
+	)
+	if err != nil {
+		return AssetReference{}, err
+	}
+
+	return AssetReference{
+		Asset: asset,
+	}, nil
 }
 
 func (s *AssetService) PublicURL(
 	asset models.Asset,
 ) (string, error) {
-	return s.URL(
-		context.Background(),
-		asset,
-		15*time.Minute,
+	if asset.ID == uuid.Nil {
+		return "", fmt.Errorf(
+			"asset ID is empty",
+		)
+	}
+
+	return "", fmt.Errorf(
+		"direct public asset URLs are disabled",
+	)
+}
+
+func (s *AssetService) URL(
+	ctx context.Context,
+	asset models.Asset,
+	expires time.Duration,
+) (string, error) {
+	return "", fmt.Errorf(
+		"direct asset URLs are disabled",
 	)
 }

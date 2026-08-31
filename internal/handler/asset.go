@@ -2,13 +2,16 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 
+	"elevate/internal/models"
 	"elevate/internal/service"
 )
 
@@ -84,23 +87,12 @@ func (h *AssetHandler) Get(
 		return
 	}
 
-	url, err := h.assets.PublicURL(
-		asset,
-	)
-	if err == nil {
-		c.JSON(
-			http.StatusOK,
-			gin.H{
-				"asset": asset,
-				"url":   url,
-			},
-		)
-		return
-	}
-
 	c.JSON(
 		http.StatusOK,
-		asset,
+		gin.H{
+			"asset": asset,
+			"url":   nil,
+		},
 	)
 }
 
@@ -143,7 +135,9 @@ func (h *AssetHandler) Upload(
 		"Content-Type",
 	)
 
-	if strings.TrimSpace(contentType) == "" {
+	if strings.TrimSpace(
+		contentType,
+	) == "" {
 		contentType = "application/octet-stream"
 	}
 
@@ -165,17 +159,186 @@ func (h *AssetHandler) Upload(
 		return
 	}
 
-	url, _ := h.assets.PublicURL(
-		asset,
-	)
-
 	c.JSON(
 		http.StatusCreated,
 		gin.H{
 			"asset": asset,
-			"url":   url,
+			"url":   nil,
 		},
 	)
+}
+
+func (h *AssetHandler) Open(
+	c *gin.Context,
+) {
+	h.stream(
+		c,
+		false,
+	)
+}
+
+func (h *AssetHandler) Download(
+	c *gin.Context,
+) {
+	h.stream(
+		c,
+		true,
+	)
+}
+
+func (h *AssetHandler) stream(
+	c *gin.Context,
+	download bool,
+) {
+	id, ok := parseUUIDParam(
+		c,
+		"id",
+	)
+	if !ok {
+		return
+	}
+
+	object, err := h.assets.Open(
+		c.Request.Context(),
+		id,
+	)
+	if errors.Is(
+		err,
+		pgx.ErrNoRows,
+	) {
+		jsonError(
+			c,
+			http.StatusNotFound,
+			"asset not found",
+		)
+		return
+	}
+
+	if err != nil {
+		jsonError(
+			c,
+			http.StatusBadGateway,
+			err.Error(),
+		)
+		return
+	}
+
+	defer object.Body.Close()
+
+	filename := assetFilename(
+		object.Asset,
+	)
+
+	disposition := "inline"
+
+	if download {
+		disposition = "attachment"
+	}
+
+	c.Header(
+		"Content-Disposition",
+		fmt.Sprintf(
+			`%s; filename="%s"`,
+			disposition,
+			filename,
+		),
+	)
+
+	c.Header(
+		"Cache-Control",
+		"private, max-age=300",
+	)
+
+	c.Header(
+		"X-Content-Type-Options",
+		"nosniff",
+	)
+
+	c.DataFromReader(
+		http.StatusOK,
+		object.ContentLength,
+		object.ContentType,
+		object.Body,
+		nil,
+	)
+}
+
+func (h *AssetHandler) Campaigns(
+	c *gin.Context,
+) {
+	id, ok := parseUUIDParam(
+		c,
+		"id",
+	)
+	if !ok {
+		return
+	}
+
+	campaigns, err := h.assets.AttachedCampaigns(
+		c.Request.Context(),
+		id,
+	)
+	if err != nil {
+		jsonError(
+			c,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	c.JSON(
+		http.StatusOK,
+		gin.H{
+			"campaigns": campaigns,
+		},
+	)
+}
+
+func assetFilename(
+	asset models.Asset,
+) string {
+	name := strings.TrimSpace(
+		asset.Name,
+	)
+
+	if name == "" {
+		name = "asset"
+	}
+
+	name = path.Base(name)
+
+	name = strings.ReplaceAll(
+		name,
+		"\r",
+		"",
+	)
+
+	name = strings.ReplaceAll(
+		name,
+		"\n",
+		"",
+	)
+
+	name = strings.ReplaceAll(
+		name,
+		`"`,
+		"",
+	)
+
+	if path.Ext(name) == "" {
+		storageExt := path.Ext(
+			strings.TrimSpace(
+				asset.StoragePath,
+			),
+		)
+
+		if storageExt != "" {
+			name += storageExt
+		}
+	}
+
+	return name
 }
 
 func (h *AssetHandler) Delete(
@@ -189,22 +352,24 @@ func (h *AssetHandler) Delete(
 		return
 	}
 
-	if err := h.assets.Delete(
+	err := h.assets.Delete(
 		c.Request.Context(),
 		id,
-	); err != nil {
-		if errors.Is(
-			err,
-			pgx.ErrNoRows,
-		) {
-			jsonError(
-				c,
-				http.StatusNotFound,
-				"asset not found",
-			)
-			return
-		}
+	)
 
+	if errors.Is(
+		err,
+		pgx.ErrNoRows,
+	) {
+		jsonError(
+			c,
+			http.StatusNotFound,
+			"asset not found",
+		)
+		return
+	}
+
+	if err != nil {
 		jsonError(
 			c,
 			http.StatusInternalServerError,

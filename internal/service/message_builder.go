@@ -17,6 +17,7 @@ type WhatsAppFollowupContext struct {
 	Messages       []repository.ConversationMessage
 	Classification models.ClassificationLabel
 	Campaign       models.Campaign
+	HasAttachments bool
 }
 
 func NewWhatsAppMessageBuilder() *WhatsAppMessageBuilder {
@@ -32,72 +33,31 @@ func (b *WhatsAppMessageBuilder) BuildFollowup(
 		"Thanks for speaking with me today. Here’s a quick recap of what we discussed:",
 	}
 
-	appendDiscoveryLine(
-		&lines,
-		"Business",
-		ctx.Discovery.BusinessNiche,
-	)
+	appendDiscoveryLine(&lines, "Business", ctx.Discovery.BusinessNiche)
+	appendDiscoveryLine(&lines, "Products", ctx.Discovery.ProductsSold)
+	appendDiscoveryLine(&lines, "Product count", ctx.Discovery.ProductCountEstimate)
+	appendDiscoveryLine(&lines, "Budget", ctx.Discovery.BudgetRange)
+	appendDiscoveryLine(&lines, "Timeline", ctx.Discovery.Timeline)
 
-	appendDiscoveryLine(
-		&lines,
-		"Products",
-		ctx.Discovery.ProductsSold,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Product count",
-		ctx.Discovery.ProductCountEstimate,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Budget",
-		ctx.Discovery.BudgetRange,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Timeline",
-		ctx.Discovery.Timeline,
-	)
-
-	features := extractJSONFeatures(
-		ctx.Discovery.FeaturesRequested,
-	)
+	features := extractJSONFeatures(ctx.Discovery.FeaturesRequested)
 
 	if len(features) > 0 {
-		lines = append(
-			lines,
-			"Features: "+strings.Join(
-				features,
-				", ",
-			),
-		)
+		lines = append(lines, "Features: "+strings.Join(features, ", "))
 	}
 
-	if notes := optionalText(
-		ctx.Discovery.ExtraNotes,
-	); notes != "" {
-		lines = append(
-			lines,
-			"Key point: "+notes,
-		)
+	if notes := optionalText(ctx.Discovery.ExtraNotes); notes != "" {
+		lines = append(lines, "Key point: "+notes)
 	}
 
 	if ctx.Classification != "" &&
 		ctx.Classification != models.ClassificationUnclassified {
 		lines = append(
 			lines,
-			"Lead status: "+strings.ToUpper(
-				string(ctx.Classification),
-			),
+			"Lead status: "+strings.ToUpper(string(ctx.Classification)),
 		)
 	}
 
-	if summary := buildConversationSummary(
-		ctx.Messages,
-	); summary != "" {
+	if summary := buildConversationSummary(ctx.Messages); summary != "" {
 		lines = append(
 			lines,
 			"",
@@ -109,32 +69,22 @@ func (b *WhatsAppMessageBuilder) BuildFollowup(
 	lines = append(
 		lines,
 		"",
-		buildNextStep(
-			ctx.Discovery,
-			ctx.Classification,
-		),
+		buildNextStep(ctx.Discovery, ctx.Classification),
 	)
 
-	if phone := campaignPhone(
-		ctx.Campaign.AgentPhoneNumber,
-	); phone != "" {
+	if phone := campaignPhone(ctx.Campaign.AgentPhoneNumber); phone != "" {
+		lines = append(lines, "", "You can reach me at "+phone+".")
+	}
+
+	if ctx.HasAttachments {
 		lines = append(
 			lines,
 			"",
-			"You can reach me at "+phone+".",
+			"I’ve attached the architecture overview and my resume for reference.",
 		)
 	}
 
-	lines = append(
-		lines,
-		"",
-		"I’ve attached the architecture overview and my resume for reference.",
-	)
-
-	return strings.Join(
-		lines,
-		"\n",
-	)
+	return strings.Join(lines, "\n")
 }
 
 func (b *WhatsAppMessageBuilder) BuildBrochure(
@@ -148,48 +98,16 @@ func (b *WhatsAppMessageBuilder) BuildBrochure(
 		"Here’s the information we discussed:",
 	}
 
-	appendDiscoveryLine(
-		&lines,
-		"Business",
-		discovery.BusinessNiche,
-	)
+	appendDiscoveryLine(&lines, "Business", discovery.BusinessNiche)
+	appendDiscoveryLine(&lines, "Products", discovery.ProductsSold)
+	appendDiscoveryLine(&lines, "Product count", discovery.ProductCountEstimate)
+	appendDiscoveryLine(&lines, "Budget", discovery.BudgetRange)
+	appendDiscoveryLine(&lines, "Timeline", discovery.Timeline)
 
-	appendDiscoveryLine(
-		&lines,
-		"Products",
-		discovery.ProductsSold,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Product count",
-		discovery.ProductCountEstimate,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Budget",
-		discovery.BudgetRange,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Timeline",
-		discovery.Timeline,
-	)
-
-	features := extractJSONFeatures(
-		discovery.FeaturesRequested,
-	)
+	features := extractJSONFeatures(discovery.FeaturesRequested)
 
 	if len(features) > 0 {
-		lines = append(
-			lines,
-			"Features: "+strings.Join(
-				features,
-				", ",
-			),
-		)
+		lines = append(lines, "Features: "+strings.Join(features, ", "))
 	}
 
 	lines = append(
@@ -198,10 +116,7 @@ func (b *WhatsAppMessageBuilder) BuildBrochure(
 		"Feel free to reply here if you’d like to continue the discussion.",
 	)
 
-	return strings.Join(
-		lines,
-		"\n",
-	)
+	return strings.Join(lines, "\n")
 }
 
 func (b *WhatsAppMessageBuilder) BuildResume(
@@ -230,69 +145,26 @@ func (b *WhatsAppMessageBuilder) BuildMidCall(
 		"Thanks. I’ve captured the details you shared.",
 	}
 
-	appendDiscoveryLine(
-		&lines,
-		"Business",
-		discovery.BusinessNiche,
-	)
+	appendDiscoveryLine(&lines, "Business", discovery.BusinessNiche)
+	appendDiscoveryLine(&lines, "Products", discovery.ProductsSold)
+	appendDiscoveryLine(&lines, "Product count", discovery.ProductCountEstimate)
+	appendDiscoveryLine(&lines, "Budget", discovery.BudgetRange)
+	appendDiscoveryLine(&lines, "Timeline", discovery.Timeline)
 
-	appendDiscoveryLine(
-		&lines,
-		"Products",
-		discovery.ProductsSold,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Product count",
-		discovery.ProductCountEstimate,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Budget",
-		discovery.BudgetRange,
-	)
-
-	appendDiscoveryLine(
-		&lines,
-		"Timeline",
-		discovery.Timeline,
-	)
-
-	features := extractJSONFeatures(
-		discovery.FeaturesRequested,
-	)
+	features := extractJSONFeatures(discovery.FeaturesRequested)
 
 	if len(features) > 0 {
-		lines = append(
-			lines,
-			"Features: "+strings.Join(
-				features,
-				", ",
-			),
-		)
+		lines = append(lines, "Features: "+strings.Join(features, ", "))
 	}
 
-	if value := strings.TrimSpace(
-		quote,
-	); value != "" {
-		lines = append(
-			lines,
-			"",
-			`You mentioned: "`+value+`"`,
-		)
+	if value := strings.TrimSpace(quote); value != "" {
+		lines = append(lines, "", `You mentioned: "`+value+`"`)
 	}
 
-	return strings.Join(
-		lines,
-		"\n",
-	)
+	return strings.Join(lines, "\n")
 }
 
-func safeName(
-	name *string,
-) string {
+func safeName(name *string) string {
 	if name == nil {
 		return "there"
 	}
@@ -306,9 +178,7 @@ func safeName(
 	return value
 }
 
-func optionalText(
-	value *string,
-) string {
+func optionalText(value *string) string {
 	if value == nil {
 		return ""
 	}
@@ -316,9 +186,7 @@ func optionalText(
 	return strings.TrimSpace(*value)
 }
 
-func campaignPhone(
-	value *string,
-) string {
+func campaignPhone(value *string) string {
 	if value == nil {
 		return ""
 	}
@@ -337,34 +205,21 @@ func appendDiscoveryLine(
 		return
 	}
 
-	*lines = append(
-		*lines,
-		label+": "+valueText,
-	)
+	*lines = append(*lines, label+": "+valueText)
 }
 
-func extractJSONFeatures(
-	raw models.JSONB,
-) []string {
+func extractJSONFeatures(raw models.JSONB) []string {
 	if len(raw) == 0 {
 		return nil
 	}
 
 	var values []string
 
-	if err := json.Unmarshal(
-		raw,
-		&values,
-	); err != nil {
+	if err := json.Unmarshal(raw, &values); err != nil {
 		return nil
 	}
 
-	result := make(
-		[]string,
-		0,
-		len(values),
-	)
-
+	result := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 
 	for _, value := range values {
@@ -381,11 +236,7 @@ func extractJSONFeatures(
 		}
 
 		seen[key] = struct{}{}
-
-		result = append(
-			result,
-			value,
-		)
+		result = append(result, value)
 	}
 
 	return result
@@ -394,28 +245,20 @@ func extractJSONFeatures(
 func buildConversationSummary(
 	messages []repository.ConversationMessage,
 ) string {
-	leadMessages := make(
-		[]string,
-		0,
-	)
+	leadMessages := make([]string, 0)
 
 	for _, message := range messages {
 		if message.Role != models.MessageRoleUser {
 			continue
 		}
 
-		content := strings.TrimSpace(
-			message.Content,
-		)
+		content := strings.TrimSpace(message.Content)
 
 		if content == "" {
 			continue
 		}
 
-		leadMessages = append(
-			leadMessages,
-			content,
-		)
+		leadMessages = append(leadMessages, content)
 	}
 
 	if len(leadMessages) == 0 {
@@ -431,24 +274,13 @@ func buildConversationSummary(
 	}
 
 	selected := leadMessages[start:]
-
-	lines := make(
-		[]string,
-		0,
-		len(selected),
-	)
+	lines := make([]string, 0, len(selected))
 
 	for _, message := range selected {
-		lines = append(
-			lines,
-			"• "+message,
-		)
+		lines = append(lines, "• "+message)
 	}
 
-	return strings.Join(
-		lines,
-		"\n",
-	)
+	return strings.Join(lines, "\n")
 }
 
 func buildNextStep(

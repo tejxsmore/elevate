@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -65,53 +66,30 @@ func (e *ActionExecutor) Execute(
 	action models.CallAction,
 ) error {
 	if e == nil {
-		return fmt.Errorf(
-			"action executor is not configured",
-		)
+		return fmt.Errorf("action executor is not configured")
 	}
 
 	switch action.ActionType {
 	case models.ActionWhatsappMidCall:
-		return e.executeMidCallWhatsApp(
-			ctx,
-			action,
-		)
+		return e.executeMidCallWhatsApp(ctx, action)
 
 	case models.ActionWhatsappBrochure:
-		return e.executeBrochureWhatsApp(
-			ctx,
-			action,
-		)
+		return e.executeBrochureWhatsApp(ctx, action)
 
 	case models.ActionWhatsappFollowup:
-		return e.executeFollowupWhatsApp(
-			ctx,
-			action,
-		)
+		return e.executeFollowupWhatsApp(ctx, action)
 
 	case models.ActionWhatsappResume:
-		return e.executeResumeWhatsApp(
-			ctx,
-			action,
-		)
+		return e.executeResumeWhatsApp(ctx, action)
 
 	case models.ActionScheduleCallback:
-		return e.executeScheduleCallback(
-			ctx,
-			action,
-		)
+		return e.executeScheduleCallback(ctx, action)
 
 	case models.ActionUpdateClassification:
-		return e.executeUpdateClassification(
-			ctx,
-			action,
-		)
+		return e.executeUpdateClassification(ctx, action)
 
 	default:
-		return fmt.Errorf(
-			"unsupported action type: %s",
-			action.ActionType,
-		)
+		return fmt.Errorf("unsupported action type: %s", action.ActionType)
 	}
 }
 
@@ -120,77 +98,45 @@ func (e *ActionExecutor) executeMidCallWhatsApp(
 	action models.CallAction,
 ) error {
 	if e.whatsapp == nil {
-		return fmt.Errorf(
-			"mid-call WhatsApp: WhatsApp service is not configured",
-		)
+		return fmt.Errorf("mid-call WhatsApp: WhatsApp service is not configured")
 	}
 
-	call, err := e.callRepo.Get(
-		ctx,
-		action.CallID,
-	)
+	call, err := e.callRepo.Get(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"mid-call WhatsApp: get call: %w",
-			err,
-		)
+		return fmt.Errorf("mid-call WhatsApp: get call: %w", err)
 	}
 
-	lead, err := e.leadRepo.Get(
-		ctx,
-		call.LeadID,
-	)
+	lead, err := e.leadRepo.Get(ctx, call.LeadID)
 	if err != nil {
-		return fmt.Errorf(
-			"mid-call WhatsApp: get lead: %w",
-			err,
-		)
+		return fmt.Errorf("mid-call WhatsApp: get lead: %w", err)
 	}
 
-	discovery, err := e.discoveryRepo.GetByCallID(
-		ctx,
-		action.CallID,
-	)
+	discovery, err := e.discoveryRepo.GetByCallID(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"mid-call WhatsApp: get discovery: %w",
-			err,
-		)
+		return fmt.Errorf("mid-call WhatsApp: get discovery: %w", err)
 	}
 
-	payload := decodeActionPayload(
-		action.Payload,
-	)
+	payload := decodeActionPayload(action.Payload)
 
 	quote, _ := payload["quote"].(string)
 
-	body := e.messageBuilder.BuildMidCall(
-		lead,
-		discovery,
-		quote,
-	)
+	body := e.messageBuilder.BuildMidCall(lead, discovery, quote)
 
 	_, err = e.whatsapp.Send(
 		ctx,
 		WhatsappSendInput{
-			CallID:      &action.CallID,
-			LeadID:      call.LeadID,
-			ActionID:    &action.ID,
-			MessageType: models.WAMessageTypeMidCallIntent,
-			ToNumber:    lead.PhoneE164,
-			Body:        body,
-			IdempotencyKey: resolveActionIdempotencyKey(
-				action,
-				payload,
-			),
+			CallID:         &action.CallID,
+			LeadID:         call.LeadID,
+			ActionID:       &action.ID,
+			MessageType:    models.WAMessageTypeMidCallIntent,
+			ToNumber:       lead.PhoneE164,
+			Body:           body,
+			IdempotencyKey: resolveActionIdempotencyKey(action, payload),
 			SentDuringCall: true,
 		},
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"mid-call WhatsApp: send: %w",
-			err,
-		)
+		return fmt.Errorf("mid-call WhatsApp: send: %w", err)
 	}
 
 	return nil
@@ -201,89 +147,50 @@ func (e *ActionExecutor) executeBrochureWhatsApp(
 	action models.CallAction,
 ) error {
 	if e.whatsapp == nil {
-		return fmt.Errorf(
-			"brochure WhatsApp: WhatsApp service is not configured",
-		)
+		return fmt.Errorf("brochure WhatsApp: WhatsApp service is not configured")
 	}
 
-	call, err := e.callRepo.Get(
-		ctx,
-		action.CallID,
-	)
+	call, err := e.callRepo.Get(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"brochure WhatsApp: get call: %w",
-			err,
-		)
+		return fmt.Errorf("brochure WhatsApp: get call: %w", err)
 	}
 
-	lead, err := e.leadRepo.Get(
-		ctx,
-		call.LeadID,
-	)
+	lead, err := e.leadRepo.Get(ctx, call.LeadID)
 	if err != nil {
-		return fmt.Errorf(
-			"brochure WhatsApp: get lead: %w",
-			err,
-		)
+		return fmt.Errorf("brochure WhatsApp: get lead: %w", err)
 	}
 
-	discovery, err := e.discoveryRepo.GetByCallID(
-		ctx,
-		action.CallID,
-	)
+	discovery, err := e.discoveryRepo.GetByCallID(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"brochure WhatsApp: get discovery: %w",
-			err,
-		)
+		return fmt.Errorf("brochure WhatsApp: get discovery: %w", err)
 	}
 
-	body := e.messageBuilder.BuildBrochure(
-		lead,
-		discovery,
-	)
+	body := e.messageBuilder.BuildBrochure(lead, discovery)
 
-	assets, err := e.loadCampaignAssets(
-		ctx,
-		call.CampaignID,
-		false,
-		true,
-	)
+	assets, err := e.loadCampaignAssets(ctx, call.CampaignID, false, true)
 	if err != nil {
-		return fmt.Errorf(
-			"brochure WhatsApp: load asset: %w",
-			err,
-		)
+		return fmt.Errorf("brochure WhatsApp: load asset: %w", err)
 	}
 
-	payload := decodeActionPayload(
-		action.Payload,
-	)
+	payload := decodeActionPayload(action.Payload)
 
 	_, err = e.whatsapp.Send(
 		ctx,
 		WhatsappSendInput{
-			CallID:      &action.CallID,
-			LeadID:      call.LeadID,
-			ActionID:    &action.ID,
-			MessageType: models.WAMessageTypeBrochure,
-			ToNumber:    lead.PhoneE164,
-			Body:        body,
-			MediaURLs:   assetURLs(assets),
-			AssetIDs:    assetIDs(assets),
-			IdempotencyKey: resolveActionIdempotencyKey(
-				action,
-				payload,
-			),
+			CallID:         &action.CallID,
+			LeadID:         call.LeadID,
+			ActionID:       &action.ID,
+			MessageType:    models.WAMessageTypeBrochure,
+			ToNumber:       lead.PhoneE164,
+			Body:           body,
+			MediaURLs:      assetURLs(assets),
+			AssetIDs:       assetIDs(assets),
+			IdempotencyKey: resolveActionIdempotencyKey(action, payload),
 			SentDuringCall: true,
 		},
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"brochure WhatsApp: send: %w",
-			err,
-		)
+		return fmt.Errorf("brochure WhatsApp: send: %w", err)
 	}
 
 	return nil
@@ -294,82 +201,40 @@ func (e *ActionExecutor) executeFollowupWhatsApp(
 	action models.CallAction,
 ) error {
 	if e.whatsapp == nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: WhatsApp service is not configured",
-		)
+		return fmt.Errorf("follow-up WhatsApp: WhatsApp service is not configured")
 	}
 
-	call, err := e.callRepo.Get(
-		ctx,
-		action.CallID,
-	)
+	call, err := e.callRepo.Get(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: get call: %w",
-			err,
-		)
+		return fmt.Errorf("follow-up WhatsApp: get call: %w", err)
 	}
 
-	lead, err := e.leadRepo.Get(
-		ctx,
-		call.LeadID,
-	)
+	lead, err := e.leadRepo.Get(ctx, call.LeadID)
 	if err != nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: get lead: %w",
-			err,
-		)
+		return fmt.Errorf("follow-up WhatsApp: get lead: %w", err)
 	}
 
-	discovery, err := e.discoveryRepo.GetByCallID(
-		ctx,
-		action.CallID,
-	)
+	discovery, err := e.discoveryRepo.GetByCallID(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: get discovery: %w",
-			err,
-		)
+		return fmt.Errorf("follow-up WhatsApp: get discovery: %w", err)
 	}
 
-	campaign, err := e.loadCampaign(
-		ctx,
-		call.CampaignID,
-	)
+	campaign, err := e.loadCampaign(ctx, call.CampaignID)
 	if err != nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: get campaign: %w",
-			err,
-		)
+		return fmt.Errorf("follow-up WhatsApp: get campaign: %w", err)
 	}
 
-	messages, err := e.convRepo.RecentMessages(
-		ctx,
-		action.CallID,
-		20,
-	)
+	messages, err := e.convRepo.RecentMessages(ctx, action.CallID, 20)
 	if err != nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: get conversation: %w",
-			err,
-		)
+		return fmt.Errorf("follow-up WhatsApp: get conversation: %w", err)
 	}
 
-	classification :=
-		models.ClassificationUnclassified
+	classification := models.ClassificationUnclassified
 
 	if e.classification != nil {
-		value, classificationErr :=
-			e.classification.Latest(
-				ctx,
-				action.CallID,
-			)
+		value, classificationErr := e.classification.Latest(ctx, action.CallID)
 
-		if classificationErr != nil &&
-			!errors.Is(
-				classificationErr,
-				pgx.ErrNoRows,
-			) {
+		if classificationErr != nil && !errors.Is(classificationErr, pgx.ErrNoRows) {
 			return fmt.Errorf(
 				"follow-up WhatsApp: get classification: %w",
 				classificationErr,
@@ -381,6 +246,18 @@ func (e *ActionExecutor) executeFollowupWhatsApp(
 		}
 	}
 
+	assets, assetErr := e.loadCampaignAssets(ctx, call.CampaignID, true, true)
+
+	if assetErr != nil {
+		log.Printf(
+			"action_executor: call=%s follow-up WhatsApp: load campaign assets failed, sending without attachments: %v",
+			action.CallID,
+			assetErr,
+		)
+
+		assets = nil
+	}
+
 	body := e.messageBuilder.BuildFollowup(
 		WhatsAppFollowupContext{
 			Lead:           lead,
@@ -389,49 +266,29 @@ func (e *ActionExecutor) executeFollowupWhatsApp(
 			Messages:       messages,
 			Classification: classification,
 			Campaign:       campaign,
+			HasAttachments: len(assets) > 0,
 		},
 	)
 
-	payload := decodeActionPayload(
-		action.Payload,
-	)
-
-	var assets []AssetReference
-
-	assets, assetErr := e.loadCampaignAssets(
-		ctx,
-		call.CampaignID,
-		true,
-		true,
-	)
-
-	if assetErr != nil {
-		assets = nil
-	}
+	payload := decodeActionPayload(action.Payload)
 
 	_, err = e.whatsapp.Send(
 		ctx,
 		WhatsappSendInput{
-			CallID:      &action.CallID,
-			LeadID:      call.LeadID,
-			ActionID:    &action.ID,
-			MessageType: models.WAMessageTypePostCallFollowup,
-			ToNumber:    lead.PhoneE164,
-			Body:        body,
-			MediaURLs:   assetURLs(assets),
-			AssetIDs:    assetIDs(assets),
-			IdempotencyKey: resolveActionIdempotencyKey(
-				action,
-				payload,
-			),
+			CallID:         &action.CallID,
+			LeadID:         call.LeadID,
+			ActionID:       &action.ID,
+			MessageType:    models.WAMessageTypePostCallFollowup,
+			ToNumber:       lead.PhoneE164,
+			Body:           body,
+			MediaURLs:      assetURLs(assets),
+			AssetIDs:       assetIDs(assets),
+			IdempotencyKey: resolveActionIdempotencyKey(action, payload),
 			SentDuringCall: false,
 		},
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"follow-up WhatsApp: send: %w",
-			err,
-		)
+		return fmt.Errorf("follow-up WhatsApp: send: %w", err)
 	}
 
 	return nil
@@ -442,83 +299,49 @@ func (e *ActionExecutor) executeResumeWhatsApp(
 	action models.CallAction,
 ) error {
 	if e.whatsapp == nil {
-		return fmt.Errorf(
-			"resume WhatsApp: WhatsApp service is not configured",
-		)
+		return fmt.Errorf("resume WhatsApp: WhatsApp service is not configured")
 	}
 
-	call, err := e.callRepo.Get(
-		ctx,
-		action.CallID,
-	)
+	call, err := e.callRepo.Get(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"resume WhatsApp: get call: %w",
-			err,
-		)
+		return fmt.Errorf("resume WhatsApp: get call: %w", err)
 	}
 
-	lead, err := e.leadRepo.Get(
-		ctx,
-		call.LeadID,
-	)
+	lead, err := e.leadRepo.Get(ctx, call.LeadID)
 	if err != nil {
-		return fmt.Errorf(
-			"resume WhatsApp: get lead: %w",
-			err,
-		)
+		return fmt.Errorf("resume WhatsApp: get lead: %w", err)
 	}
 
-	body := e.messageBuilder.BuildResume(
-		lead,
-	)
+	body := e.messageBuilder.BuildResume(lead)
 
-	assets, err := e.loadCampaignAssets(
-		ctx,
-		call.CampaignID,
-		true,
-		false,
-	)
+	assets, err := e.loadCampaignAssets(ctx, call.CampaignID, true, false)
 	if err != nil {
-		return fmt.Errorf(
-			"resume WhatsApp: load resume asset: %w",
-			err,
-		)
+		return fmt.Errorf("resume WhatsApp: load resume asset: %w", err)
 	}
 
 	if len(assets) == 0 {
-		return fmt.Errorf(
-			"resume WhatsApp: resume asset is not available",
-		)
+		return fmt.Errorf("resume WhatsApp: resume asset is not available")
 	}
 
-	payload := decodeActionPayload(
-		action.Payload,
-	)
+	payload := decodeActionPayload(action.Payload)
 
 	_, err = e.whatsapp.Send(
 		ctx,
 		WhatsappSendInput{
-			CallID:      &action.CallID,
-			LeadID:      call.LeadID,
-			ActionID:    &action.ID,
-			MessageType: models.WAMessageTypeResumeSend,
-			ToNumber:    lead.PhoneE164,
-			Body:        body,
-			MediaURLs:   assetURLs(assets),
-			AssetIDs:    assetIDs(assets),
-			IdempotencyKey: resolveActionIdempotencyKey(
-				action,
-				payload,
-			),
+			CallID:         &action.CallID,
+			LeadID:         call.LeadID,
+			ActionID:       &action.ID,
+			MessageType:    models.WAMessageTypeResumeSend,
+			ToNumber:       lead.PhoneE164,
+			Body:           body,
+			MediaURLs:      assetURLs(assets),
+			AssetIDs:       assetIDs(assets),
+			IdempotencyKey: resolveActionIdempotencyKey(action, payload),
 			SentDuringCall: false,
 		},
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"resume WhatsApp: send: %w",
-			err,
-		)
+		return fmt.Errorf("resume WhatsApp: send: %w", err)
 	}
 
 	return nil
@@ -529,32 +352,20 @@ func (e *ActionExecutor) executeUpdateClassification(
 	action models.CallAction,
 ) error {
 	if e.classification == nil {
-		return fmt.Errorf(
-			"classification repository is not configured",
-		)
+		return fmt.Errorf("classification repository is not configured")
 	}
 
-	payload := decodeActionPayload(
-		action.Payload,
-	)
+	payload := decodeActionPayload(action.Payload)
 
-	rawClassification, ok :=
-		payload["classification"].(string)
+	rawClassification, ok := payload["classification"].(string)
 
 	if !ok {
-		return fmt.Errorf(
-			"classification action missing classification",
-		)
+		return fmt.Errorf("classification action missing classification")
 	}
 
-	classification :=
-		models.ClassificationLabel(
-			strings.ToLower(
-				strings.TrimSpace(
-					rawClassification,
-				),
-			),
-		)
+	classification := models.ClassificationLabel(
+		strings.ToLower(strings.TrimSpace(rawClassification)),
+	)
 
 	switch classification {
 	case models.ClassificationHot,
@@ -562,10 +373,7 @@ func (e *ActionExecutor) executeUpdateClassification(
 		models.ClassificationCold,
 		models.ClassificationUnclassified:
 	default:
-		return fmt.Errorf(
-			"invalid classification: %s",
-			rawClassification,
-		)
+		return fmt.Errorf("invalid classification: %s", rawClassification)
 	}
 
 	confidence := 0.0
@@ -587,8 +395,7 @@ func (e *ActionExecutor) executeUpdateClassification(
 		confidence = 1
 	}
 
-	summary, _ :=
-		payload["summary"].(string)
+	summary, _ := payload["summary"].(string)
 
 	signals := map[string]any{
 		"source":  "action_executor",
@@ -605,10 +412,7 @@ func (e *ActionExecutor) executeUpdateClassification(
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"create classification: %w",
-			err,
-		)
+		return fmt.Errorf("create classification: %w", err)
 	}
 
 	if e.callRepo != nil {
@@ -619,10 +423,7 @@ func (e *ActionExecutor) executeUpdateClassification(
 			confidence,
 			item.SequenceNumber,
 		); err != nil {
-			return fmt.Errorf(
-				"sync call classification: %w",
-				err,
-			)
+			return fmt.Errorf("sync call classification: %w", err)
 		}
 	}
 
@@ -634,15 +435,11 @@ func (e *ActionExecutor) executeScheduleCallback(
 	action models.CallAction,
 ) error {
 	if e.callbacks == nil {
-		return fmt.Errorf(
-			"callback service is not configured",
-		)
+		return fmt.Errorf("callback service is not configured")
 	}
 
 	if e.callbackRepo == nil {
-		return fmt.Errorf(
-			"callback repository is not configured",
-		)
+		return fmt.Errorf("callback repository is not configured")
 	}
 
 	var payload struct {
@@ -652,69 +449,38 @@ func (e *ActionExecutor) executeScheduleCallback(
 	}
 
 	if len(action.Payload) == 0 {
-		return fmt.Errorf(
-			"callback action payload is empty",
-		)
+		return fmt.Errorf("callback action payload is empty")
 	}
 
-	if err := json.Unmarshal(
-		action.Payload,
-		&payload,
-	); err != nil {
-		return fmt.Errorf(
-			"callback action payload: %w",
-			err,
-		)
+	if err := json.Unmarshal(action.Payload, &payload); err != nil {
+		return fmt.Errorf("callback action payload: %w", err)
 	}
 
-	payload.RequestedTime =
-		strings.TrimSpace(
-			payload.RequestedTime,
-		)
+	payload.RequestedTime = strings.TrimSpace(payload.RequestedTime)
 
 	if payload.RequestedTime == "" {
-		return fmt.Errorf(
-			"callback action missing requested_time",
-		)
+		return fmt.Errorf("callback action missing requested_time")
 	}
 
-	payload.Timezone =
-		strings.TrimSpace(
-			payload.Timezone,
-		)
+	payload.Timezone = strings.TrimSpace(payload.Timezone)
 
 	if payload.Timezone == "" {
 		payload.Timezone = "Asia/Kolkata"
 	}
 
-	_, err := e.callbackRepo.GetByActionID(
-		ctx,
-		action.ID,
-	)
+	_, err := e.callbackRepo.GetByActionID(ctx, action.ID)
 
 	if err == nil {
 		return nil
 	}
 
-	if !errors.Is(
-		err,
-		pgx.ErrNoRows,
-	) {
-		return fmt.Errorf(
-			"callback action: lookup existing callback: %w",
-			err,
-		)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("callback action: lookup existing callback: %w", err)
 	}
 
-	call, err := e.callRepo.Get(
-		ctx,
-		action.CallID,
-	)
+	call, err := e.callRepo.Get(ctx, action.CallID)
 	if err != nil {
-		return fmt.Errorf(
-			"callback action: get call: %w",
-			err,
-		)
+		return fmt.Errorf("callback action: get call: %w", err)
 	}
 
 	resolution := e.callbacks.Resolve(
@@ -724,14 +490,10 @@ func (e *ActionExecutor) executeScheduleCallback(
 	)
 
 	if resolution.ResolvedFrom == nil {
-		resolution.ResolvedFrom =
-			map[string]any{}
+		resolution.ResolvedFrom = map[string]any{}
 	}
 
-	resolution.ResolvedFrom["quote"] =
-		strings.TrimSpace(
-			payload.Quote,
-		)
+	resolution.ResolvedFrom["quote"] = strings.TrimSpace(payload.Quote)
 
 	_, err = e.callbacks.Create(
 		ctx,
@@ -742,10 +504,7 @@ func (e *ActionExecutor) executeScheduleCallback(
 		&action.ID,
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"callback action: create callback: %w",
-			err,
-		)
+		return fmt.Errorf("callback action: create callback: %w", err)
 	}
 
 	return nil
@@ -756,21 +515,14 @@ func (e *ActionExecutor) loadCampaign(
 	campaignID *uuid.UUID,
 ) (models.Campaign, error) {
 	if campaignID == nil {
-		return models.Campaign{}, fmt.Errorf(
-			"call has no campaign",
-		)
+		return models.Campaign{}, fmt.Errorf("call has no campaign")
 	}
 
 	if e.campaignRepo == nil {
-		return models.Campaign{}, fmt.Errorf(
-			"campaign repository is not configured",
-		)
+		return models.Campaign{}, fmt.Errorf("campaign repository is not configured")
 	}
 
-	return e.campaignRepo.Get(
-		ctx,
-		*campaignID,
-	)
+	return e.campaignRepo.Get(ctx, *campaignID)
 }
 
 func (e *ActionExecutor) loadCampaignAssets(
@@ -780,147 +532,93 @@ func (e *ActionExecutor) loadCampaignAssets(
 	includeDiagram bool,
 ) ([]AssetReference, error) {
 	if campaignID == nil {
-		return nil, fmt.Errorf(
-			"call has no campaign",
-		)
+		return nil, fmt.Errorf("call has no campaign")
 	}
 
 	if e.assetService == nil {
-		return nil, fmt.Errorf(
-			"asset service is not configured",
-		)
+		return nil, fmt.Errorf("asset service is not configured")
 	}
 
 	if e.campaignRepo == nil {
-		return nil, fmt.Errorf(
-			"campaign repository is not configured",
-		)
+		return nil, fmt.Errorf("campaign repository is not configured")
 	}
 
-	campaign, err := e.campaignRepo.Get(
-		ctx,
-		*campaignID,
-	)
+	campaign, err := e.campaignRepo.Get(ctx, *campaignID)
 	if err != nil {
 		return nil, err
 	}
 
-	assets := make(
-		[]AssetReference,
-		0,
-		2,
-	)
+	assets := make([]AssetReference, 0, 2)
 
 	if includeResume {
 		if campaign.DefaultResumeAssetID != nil {
-			asset, err :=
-				e.assetService.Reference(
-					ctx,
-					*campaign.DefaultResumeAssetID,
-				)
+			asset, err := e.assetService.Reference(
+				ctx,
+				*campaign.DefaultResumeAssetID,
+			)
 			if err != nil {
-				return nil, fmt.Errorf(
-					"load resume asset: %w",
-					err,
-				)
+				return nil, fmt.Errorf("load resume asset: %w", err)
 			}
 
-			assets = append(
-				assets,
-				asset,
-			)
+			assets = append(assets, asset)
 		}
 	}
 
 	if includeDiagram {
 		if campaign.DefaultDiagramAssetID != nil {
-			asset, err :=
-				e.assetService.Reference(
-					ctx,
-					*campaign.DefaultDiagramAssetID,
-				)
+			asset, err := e.assetService.Reference(
+				ctx,
+				*campaign.DefaultDiagramAssetID,
+			)
 			if err != nil {
-				return nil, fmt.Errorf(
-					"load architecture asset: %w",
-					err,
-				)
+				return nil, fmt.Errorf("load architecture asset: %w", err)
 			}
 
-			assets = append(
-				assets,
-				asset,
-			)
+			assets = append(assets, asset)
 		}
 	}
 
 	return assets, nil
 }
 
-func assetURLs(
-	assets []AssetReference,
-) []string {
-	urls := make(
-		[]string,
-		0,
-		len(assets),
-	)
+func assetURLs(assets []AssetReference) []string {
+	urls := make([]string, 0, len(assets))
 
 	for _, asset := range assets {
-		value := strings.TrimSpace(
-			asset.URL,
-		)
+		value := strings.TrimSpace(asset.URL)
 
 		if value == "" {
 			continue
 		}
 
-		urls = append(
-			urls,
-			value,
-		)
+		urls = append(urls, value)
 	}
 
 	return urls
 }
 
-func assetIDs(
-	assets []AssetReference,
-) []uuid.UUID {
-	ids := make(
-		[]uuid.UUID,
-		0,
-		len(assets),
-	)
+func assetIDs(assets []AssetReference) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(assets))
 
 	for _, asset := range assets {
 		if asset.Asset.ID == uuid.Nil {
 			continue
 		}
 
-		ids = append(
-			ids,
-			asset.Asset.ID,
-		)
+		ids = append(ids, asset.Asset.ID)
 	}
 
 	return ids
 }
 
-func decodeActionPayload(
-	raw models.JSONB,
-) map[string]any {
-	payload := make(
-		map[string]any,
-	)
+func decodeActionPayload(raw models.JSONB) map[string]any {
+	payload := make(map[string]any)
 
 	if len(raw) == 0 {
 		return payload
 	}
 
-	if err := json.Unmarshal(
-		raw,
-		&payload,
-	); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return map[string]any{}
 	}
 
@@ -932,9 +630,7 @@ func resolveActionIdempotencyKey(
 	payload map[string]any,
 ) string {
 	if action.IdempotencyKey != nil {
-		value := strings.TrimSpace(
-			*action.IdempotencyKey,
-		)
+		value := strings.TrimSpace(*action.IdempotencyKey)
 
 		if value != "" {
 			return value

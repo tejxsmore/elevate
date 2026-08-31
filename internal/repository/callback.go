@@ -534,6 +534,71 @@ func (r *CallbackRepo) MarkRescheduledForFollowUpCall(
 	return err
 }
 
+func (r *CallbackRepo) Reschedule(
+	ctx context.Context,
+	callbackID uuid.UUID,
+	scheduledFor time.Time,
+	timezone string,
+) error {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	var status models.CallbackStatus
+
+	err = tx.QueryRow(
+		ctx,
+		`
+		SELECT status
+		FROM scheduled_callbacks
+		WHERE id = $1
+		FOR UPDATE
+		`,
+		callbackID,
+	).Scan(&status)
+
+	if err != nil {
+		return err
+	}
+
+	switch status {
+	case models.CallbackCompleted:
+		return errors.New("callback is already completed")
+	case models.CallbackCanceled:
+		return errors.New("callback is canceled")
+	case models.CallbackMissed:
+		return errors.New("callback is already missed")
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`
+		UPDATE scheduled_callbacks
+		SET
+			status = 'rescheduled',
+			scheduled_for = $2,
+			timezone = $3,
+			follow_up_call_id = NULL,
+			updated_at = now()
+		WHERE id = $1
+		`,
+		callbackID,
+		scheduledFor,
+		timezone,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
 func (r *CallbackRepo) MarkMissed(
 	ctx context.Context,
 	callbackID uuid.UUID,
@@ -596,6 +661,22 @@ func (r *CallbackRepo) MarkCanceled(
 			'canceled',
 			'missed'
 		  )
+		`,
+		callbackID,
+	)
+
+	return err
+}
+
+func (r *CallbackRepo) Delete(
+	ctx context.Context,
+	callbackID uuid.UUID,
+) error {
+	_, err := r.db.Pool.Exec(
+		ctx,
+		`
+		DELETE FROM scheduled_callbacks
+		WHERE id = $1
 		`,
 		callbackID,
 	)

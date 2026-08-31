@@ -25,7 +25,6 @@ func New(
 	db *database.DB,
 	redisClient *redis.Client,
 ) *gin.Engine {
-	// Keep Gin quiet. We use our own startup and request logging.
 	gin.SetMode(gin.ReleaseMode)
 
 	leadRepo := repository.NewLeadRepo(db)
@@ -100,6 +99,7 @@ func New(
 	assetService := service.NewAssetService(
 		cfg,
 		assetRepo,
+		campaignRepo,
 		s3Client,
 	)
 
@@ -301,6 +301,21 @@ func New(
 				assetHandler.Get,
 			)
 
+			assets.GET(
+				"/:id/open",
+				assetHandler.Open,
+			)
+
+			assets.GET(
+				"/:id/campaigns",
+				assetHandler.Campaigns,
+			)
+
+			assets.GET(
+				"/:id/download",
+				assetHandler.Download,
+			)
+
 			assets.DELETE(
 				"/:id",
 				assetHandler.Delete,
@@ -366,6 +381,21 @@ func New(
 			callbacks.POST(
 				"",
 				callbackHandler.Create,
+			)
+
+			callbacks.POST(
+				"/:id/cancel",
+				callbackHandler.Cancel,
+			)
+
+			callbacks.POST(
+				"/:id/reschedule",
+				callbackHandler.Reschedule,
+			)
+
+			callbacks.DELETE(
+				"/:id",
+				callbackHandler.Delete,
 			)
 		}
 	}

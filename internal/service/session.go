@@ -940,7 +940,21 @@ func (v *VoiceSession) handleUserStartedSpeaking(
 	sequence := v.turnSeq
 	v.turnStartedAt = ev.ReceivedAt
 
+	wasAgentSpeaking := v.agentSpeaking
+
+	v.agentSpeaking = false
+	v.greetingActive = false
+
 	v.mu.Unlock()
+
+	if wasAgentSpeaking {
+		v.ClearOutboundAudio()
+
+		select {
+		case v.interruptions <- struct{}{}:
+		default:
+		}
+	}
 
 	turnID, err := v.conv.StartTurn(
 		ctx,
@@ -1079,8 +1093,6 @@ func (v *VoiceSession) persistConversationText(
 
 	turnID := v.currentTurnID
 
-	isAgentSpeaking := v.agentSpeaking
-
 	v.mu.Unlock()
 
 	speaker := models.SpeakerRoleAgent
@@ -1101,21 +1113,6 @@ func (v *VoiceSession) persistConversationText(
 	if isVoicemail {
 		v.mu.Lock()
 		v.voicemailDetected = true
-		v.mu.Unlock()
-	}
-
-	if isLead &&
-		isAgentSpeaking &&
-		!isNonSubstantiveUserText(content) &&
-		!isVoicemail {
-		select {
-		case v.interruptions <- struct{}{}:
-		default:
-		}
-
-		v.mu.Lock()
-		v.agentSpeaking = false
-		v.greetingActive = false
 		v.mu.Unlock()
 	}
 
@@ -1230,62 +1227,73 @@ func (v *VoiceSession) handleFunctionCallRequest(
 			continue
 		}
 
-		result, err := v.functions.Execute(
-			ctx,
+		v.respondToFunctionCall(ctx, conn, function)
+	}
+
+	return nil
+}
+
+func (v *VoiceSession) respondToFunctionCall(
+	ctx context.Context,
+	conn *AgentConn,
+	function AgentFunctionCall,
+) {
+	result, err := v.functions.Execute(
+		ctx,
+		v.cfg.CallID,
+		v.cfg.LeadID,
+		function,
+	)
+
+	var payload []byte
+	var marshalErr error
+
+	if err != nil {
+		log.Printf(
+			"voice_session: call=%s function=%s execute error: %v",
 			v.cfg.CallID,
-			v.cfg.LeadID,
-			function,
+			function.Name,
+			err,
 		)
 
-		if err != nil {
-			log.Printf(
-				"voice_session: call=%s function=%s execute error: %v",
-				v.cfg.CallID,
-				function.Name,
-				err,
-			)
-
-			errorResult, marshalErr := json.Marshal(
-				map[string]any{
-					"success": false,
-					"reason":  "temporary_failure",
-				},
-			)
-			if marshalErr != nil {
-				return marshalErr
-			}
-
-			if responseErr := conn.SendFunctionCallResponse(
-				function.ID,
-				function.Name,
-				string(errorResult),
-			); responseErr != nil {
-				return responseErr
-			}
-
-			continue
-		}
-
-		successResult, marshalErr := json.Marshal(
+		payload, marshalErr = json.Marshal(
+			map[string]any{
+				"success": false,
+				"reason":  "temporary_failure",
+			},
+		)
+	} else {
+		payload, marshalErr = json.Marshal(
 			map[string]any{
 				"success": true,
 				"result":  result,
 			},
 		)
-		if marshalErr != nil {
-			return marshalErr
-		}
-
-		if err := conn.SendFunctionCallResponse(
-			function.ID,
-			function.Name,
-			string(successResult),
-		); err != nil {
-			return err
-		}
 	}
 
-	return nil
+	if marshalErr != nil {
+		log.Printf(
+			"voice_session: call=%s function=%s marshal response: %v",
+			v.cfg.CallID,
+			function.Name,
+			marshalErr,
+		)
+
+		return
+	}
+
+	if sendErr := conn.SendFunctionCallResponse(
+		function.ID,
+		function.Name,
+		string(payload),
+	); sendErr != nil {
+		log.Printf(
+			"voice_session: call=%s function=%s send response: %v",
+			v.cfg.CallID,
+			function.Name,
+			sendErr,
+		)
+	}
 }
 
 func (v *VoiceSession) handleFunctionCallError(

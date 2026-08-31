@@ -123,9 +123,10 @@ func (h *CallbackHandler) Create(
 		timezone = "Asia/Kolkata"
 	}
 
-	if _, err := time.LoadLocation(
+	location, err := time.LoadLocation(
 		timezone,
-	); err != nil {
+	)
+	if err != nil {
 		jsonError(
 			c,
 			http.StatusBadRequest,
@@ -206,12 +207,7 @@ func (h *CallbackHandler) Create(
 	}
 
 	requestedTimeText := scheduledFor.
-		In(
-			time.FixedZone(
-				timezone,
-				0,
-			),
-		).
+		In(location).
 		Format(
 			"02 Jan 2006 03:04 PM",
 		)
@@ -245,5 +241,226 @@ func (h *CallbackHandler) Create(
 		gin.H{
 			"callback": callback,
 		},
+	)
+}
+
+func (h *CallbackHandler) Cancel(
+	c *gin.Context,
+) {
+	id, err := uuid.Parse(
+		strings.TrimSpace(
+			c.Param("id"),
+		),
+	)
+	if err != nil {
+		jsonError(
+			c,
+			http.StatusBadRequest,
+			"invalid id",
+		)
+		return
+	}
+
+	if err := h.callbacks.MarkCanceled(
+		c.Request.Context(),
+		id,
+	); err != nil {
+		jsonError(
+			c,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	c.Status(
+		http.StatusNoContent,
+	)
+}
+
+type rescheduleCallbackRequest struct {
+	ScheduledFor string `json:"scheduled_for" binding:"required"`
+	Timezone     string `json:"timezone"`
+}
+
+func (h *CallbackHandler) Reschedule(
+	c *gin.Context,
+) {
+	id, err := uuid.Parse(
+		strings.TrimSpace(
+			c.Param("id"),
+		),
+	)
+	if err != nil {
+		jsonError(
+			c,
+			http.StatusBadRequest,
+			"invalid id",
+		)
+		return
+	}
+
+	var req rescheduleCallbackRequest
+
+	if err := c.ShouldBindJSON(
+		&req,
+	); err != nil {
+		jsonError(
+			c,
+			http.StatusBadRequest,
+			err.Error(),
+		)
+		return
+	}
+
+	scheduledFor, err := time.Parse(
+		time.RFC3339,
+		strings.TrimSpace(
+			req.ScheduledFor,
+		),
+	)
+	if err != nil {
+		jsonError(
+			c,
+			http.StatusBadRequest,
+			"invalid scheduled_for",
+		)
+		return
+	}
+
+	if !scheduledFor.After(time.Now()) {
+		jsonError(
+			c,
+			http.StatusBadRequest,
+			"scheduled_for must be in the future",
+		)
+		return
+	}
+
+	timezone := strings.TrimSpace(req.Timezone)
+
+	if timezone == "" {
+		timezone = "Asia/Kolkata"
+	}
+
+	if _, err := time.LoadLocation(timezone); err != nil {
+		jsonError(
+			c,
+			http.StatusBadRequest,
+			"invalid timezone",
+		)
+		return
+	}
+
+	if err := h.callbacks.Reschedule(
+		c.Request.Context(),
+		id,
+		scheduledFor,
+		timezone,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(
+				c,
+				http.StatusNotFound,
+				"callback not found",
+			)
+			return
+		}
+
+		switch err.Error() {
+		case "callback is already completed":
+			jsonError(
+				c,
+				http.StatusConflict,
+				"callback is already completed",
+			)
+			return
+
+		case "callback is canceled":
+			jsonError(
+				c,
+				http.StatusConflict,
+				"callback is canceled",
+			)
+			return
+
+		case "callback is already missed":
+			jsonError(
+				c,
+				http.StatusConflict,
+				"callback is already missed",
+			)
+			return
+		}
+
+		jsonError(
+			c,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	callback, err := h.callbacks.GetByID(
+		c.Request.Context(),
+		id,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(
+			c,
+			http.StatusNotFound,
+			"callback not found",
+		)
+		return
+	}
+
+	if err != nil {
+		jsonError(
+			c,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	c.JSON(
+		http.StatusOK,
+		gin.H{
+			"callback": callback,
+		},
+	)
+}
+
+func (h *CallbackHandler) Delete(
+	c *gin.Context,
+) {
+	id, err := uuid.Parse(
+		strings.TrimSpace(
+			c.Param("id"),
+		),
+	)
+	if err != nil {
+		jsonError(
+			c,
+			http.StatusBadRequest,
+			"invalid id",
+		)
+		return
+	}
+
+	if err := h.callbacks.Delete(
+		c.Request.Context(),
+		id,
+	); err != nil {
+		jsonError(
+			c,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	c.Status(
+		http.StatusNoContent,
 	)
 }

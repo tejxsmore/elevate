@@ -498,3 +498,89 @@ func (r *CampaignRepo) SetAssets(
 
 	return campaign, err
 }
+func (r *CampaignRepo) FindByAssetID(
+	ctx context.Context,
+	assetID uuid.UUID,
+) ([]CampaignSummary, error) {
+	rows, err := r.db.Pool.Query(
+		ctx,
+		`
+		SELECT
+			id,
+			name,
+			active,
+			version,
+			agent_phone_number,
+			created_at,
+			updated_at
+		FROM campaigns
+		WHERE archived_at IS NULL
+		  AND (
+			default_resume_asset_id = $1
+			OR default_diagram_asset_id = $1
+		  )
+		ORDER BY created_at DESC
+		`,
+		assetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	campaigns := make(
+		[]CampaignSummary,
+		0,
+	)
+
+	for rows.Next() {
+		var campaign CampaignSummary
+
+		if err := rows.Scan(
+			&campaign.ID,
+			&campaign.Name,
+			&campaign.Active,
+			&campaign.Version,
+			&campaign.AgentPhoneNumber,
+			&campaign.CreatedAt,
+			&campaign.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		campaigns = append(
+			campaigns,
+			campaign,
+		)
+	}
+
+	return campaigns, rows.Err()
+}
+
+func (r *CampaignRepo) ClearAssetReference(
+	ctx context.Context,
+	assetID uuid.UUID,
+) error {
+	_, err := r.db.Pool.Exec(
+		ctx,
+		`
+		UPDATE campaigns
+		SET
+			default_resume_asset_id = CASE
+				WHEN default_resume_asset_id = $1 THEN NULL
+				ELSE default_resume_asset_id
+			END,
+			default_diagram_asset_id = CASE
+				WHEN default_diagram_asset_id = $1 THEN NULL
+				ELSE default_diagram_asset_id
+			END,
+			updated_at = now()
+		WHERE default_resume_asset_id = $1
+		   OR default_diagram_asset_id = $1
+		`,
+		assetID,
+	)
+
+	return err
+}

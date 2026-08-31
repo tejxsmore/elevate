@@ -30,21 +30,13 @@ func NewTwilioClient(
 	statusURL := ""
 
 	if len(whatsAppStatusCallbackURL) > 0 {
-		statusURL = strings.TrimSpace(
-			whatsAppStatusCallbackURL[0],
-		)
+		statusURL = strings.TrimSpace(whatsAppStatusCallbackURL[0])
 	}
 
 	return &TwilioClient{
-		AccountSID: strings.TrimSpace(
-			accountSID,
-		),
-		AuthToken: strings.TrimSpace(
-			authToken,
-		),
-		WhatsAppNumber: strings.TrimSpace(
-			whatsAppNumber,
-		),
+		AccountSID:                strings.TrimSpace(accountSID),
+		AuthToken:                 strings.TrimSpace(authToken),
+		WhatsAppNumber:            strings.TrimSpace(whatsAppNumber),
 		WhatsAppStatusCallbackURL: statusURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -52,9 +44,7 @@ func NewTwilioClient(
 	}
 }
 
-func NewTwilioClientFromConfig(
-	cfg config.TwilioConfig,
-) *TwilioClient {
+func NewTwilioClientFromConfig(cfg config.TwilioConfig) *TwilioClient {
 	return NewTwilioClient(
 		cfg.AccountSID,
 		cfg.AuthToken,
@@ -81,13 +71,13 @@ type twilioCallResponse struct {
 }
 
 type twilioMessageResponse struct {
-	SID          string      `json:"sid"`
-	Status       json.Number `json:"status"`
-	Code         int         `json:"code"`
-	Message      string      `json:"message"`
-	MoreInfo     string      `json:"more_info"`
-	ErrorCode    *int        `json:"error_code"`
-	ErrorMessage string      `json:"error_message"`
+	SID          string `json:"sid"`
+	Status       string `json:"status"`
+	Code         int    `json:"code"`
+	Message      string `json:"message"`
+	MoreInfo     string `json:"more_info"`
+	ErrorCode    *int   `json:"error_code"`
+	ErrorMessage string `json:"error_message"`
 }
 
 func (c *TwilioClient) PlaceCall(
@@ -95,16 +85,12 @@ func (c *TwilioClient) PlaceCall(
 	p TwilioCallParams,
 ) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf(
-			"twilio: client is nil",
-		)
+		return "", fmt.Errorf("twilio: client is nil")
 	}
 
 	if strings.TrimSpace(c.AccountSID) == "" ||
 		strings.TrimSpace(c.AuthToken) == "" {
-		return "", fmt.Errorf(
-			"twilio: missing credentials",
-		)
+		return "", fmt.Errorf("twilio: missing credentials")
 	}
 
 	to := strings.TrimSpace(p.To)
@@ -112,21 +98,15 @@ func (c *TwilioClient) PlaceCall(
 	voiceURL := strings.TrimSpace(p.VoiceURL)
 
 	if to == "" {
-		return "", fmt.Errorf(
-			"twilio: missing destination number",
-		)
+		return "", fmt.Errorf("twilio: missing destination number")
 	}
 
 	if from == "" {
-		return "", fmt.Errorf(
-			"twilio: missing source number",
-		)
+		return "", fmt.Errorf("twilio: missing source number")
 	}
 
 	if voiceURL == "" {
-		return "", fmt.Errorf(
-			"twilio: missing voice URL",
-		)
+		return "", fmt.Errorf("twilio: missing voice URL")
 	}
 
 	endpoint := fmt.Sprintf(
@@ -135,69 +115,45 @@ func (c *TwilioClient) PlaceCall(
 	)
 
 	form := url.Values{}
-
 	form.Set("To", to)
 	form.Set("From", from)
 	form.Set("Url", voiceURL)
 
-	if statusURL := strings.TrimSpace(
-		p.StatusCallbackURL,
-	); statusURL != "" {
+	if statusURL := strings.TrimSpace(p.StatusCallbackURL); statusURL != "" {
 		form.Set("StatusCallback", statusURL)
 		form.Set("StatusCallbackMethod", "POST")
 
-		events := append(
-			[]string(nil),
-			p.StatusCallbackEvents...,
-		)
+		events := append([]string(nil), p.StatusCallbackEvents...)
 
 		if len(events) == 0 {
-			events = []string{
-				"initiated",
-				"ringing",
-				"answered",
-				"completed",
-			}
+			events = []string{"initiated", "ringing", "answered", "completed"}
 		}
 
 		for _, event := range events {
 			event = strings.TrimSpace(event)
 
 			if event != "" {
-				form.Add(
-					"StatusCallbackEvent",
-					event,
-				)
+				form.Add("StatusCallbackEvent", event)
 			}
 		}
 	}
 
-	if recordingURL := strings.TrimSpace(
-		p.RecordingStatusCallbackURL,
-	); recordingURL != "" {
+	if recordingURL := strings.TrimSpace(p.RecordingStatusCallbackURL); recordingURL != "" {
 		form.Set("Record", "true")
 		form.Set("RecordingStatusCallback", recordingURL)
 		form.Set("RecordingStatusCallbackMethod", "POST")
 
-		events := append(
-			[]string(nil),
-			p.RecordingStatusCallbackEvents...,
-		)
+		events := append([]string(nil), p.RecordingStatusCallbackEvents...)
 
 		if len(events) == 0 {
-			events = []string{
-				"completed",
-			}
+			events = []string{"completed"}
 		}
 
 		for _, event := range events {
 			event = strings.TrimSpace(event)
 
 			if event != "" {
-				form.Add(
-					"RecordingStatusCallbackEvent",
-					event,
-				)
+				form.Add("RecordingStatusCallbackEvent", event)
 			}
 		}
 	}
@@ -209,47 +165,28 @@ func (c *TwilioClient) PlaceCall(
 		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
-		return "", fmt.Errorf(
-			"twilio: build call request: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: build call request: %w", err)
 	}
 
-	req.SetBasicAuth(
-		c.AccountSID,
-		c.AuthToken,
-	)
-
-	req.Header.Set(
-		"Content-Type",
-		"application/x-www-form-urlencoded",
-	)
+	req.SetBasicAuth(c.AccountSID, c.AuthToken)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf(
-			"twilio: call request failed: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: call request failed: %w", err)
 	}
 
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf(
-			"twilio: read call response: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: read call response: %w", err)
 	}
 
 	var out twilioCallResponse
 
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf(
-			"twilio: decode call response: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: decode call response: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusMultipleChoices {
@@ -265,17 +202,13 @@ func (c *TwilioClient) PlaceCall(
 	out.SID = strings.TrimSpace(out.SID)
 
 	if out.SID == "" {
-		return "", fmt.Errorf(
-			"twilio: call response contained no SID",
-		)
+		return "", fmt.Errorf("twilio: call response contained no SID")
 	}
 
 	return out.SID, nil
 }
 
-func normalizeWhatsAppNumber(
-	number string,
-) string {
+func normalizeWhatsAppNumber(number string) string {
 	number = strings.TrimSpace(number)
 
 	if strings.HasPrefix(number, "whatsapp:") {
@@ -292,35 +225,24 @@ func (c *TwilioClient) SendWhatsApp(
 	mediaURLs []string,
 ) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf(
-			"twilio: client is nil",
-		)
+		return "", fmt.Errorf("twilio: client is nil")
 	}
 
 	if strings.TrimSpace(c.AccountSID) == "" ||
 		strings.TrimSpace(c.AuthToken) == "" {
-		return "", fmt.Errorf(
-			"twilio: missing credentials",
-		)
+		return "", fmt.Errorf("twilio: missing credentials")
 	}
 
 	if strings.TrimSpace(c.WhatsAppNumber) == "" {
-		return "", fmt.Errorf(
-			"twilio: WhatsApp number is not configured",
-		)
+		return "", fmt.Errorf("twilio: WhatsApp number is not configured")
 	}
 
 	if strings.TrimSpace(to) == "" {
-		return "", fmt.Errorf(
-			"twilio: WhatsApp recipient is empty",
-		)
+		return "", fmt.Errorf("twilio: WhatsApp recipient is empty")
 	}
 
-	if strings.TrimSpace(body) == "" &&
-		len(mediaURLs) == 0 {
-		return "", fmt.Errorf(
-			"twilio: WhatsApp message has no body or media",
-		)
+	if strings.TrimSpace(body) == "" && len(mediaURLs) == 0 {
+		return "", fmt.Errorf("twilio: WhatsApp message has no body or media")
 	}
 
 	endpoint := fmt.Sprintf(
@@ -329,26 +251,14 @@ func (c *TwilioClient) SendWhatsApp(
 	)
 
 	form := url.Values{}
-
-	form.Set(
-		"To",
-		normalizeWhatsAppNumber(to),
-	)
-
-	form.Set(
-		"From",
-		normalizeWhatsAppNumber(
-			c.WhatsAppNumber,
-		),
-	)
+	form.Set("To", normalizeWhatsAppNumber(to))
+	form.Set("From", normalizeWhatsAppNumber(c.WhatsAppNumber))
 
 	if strings.TrimSpace(body) != "" {
 		form.Set("Body", body)
 	}
 
-	seenMedia := make(
-		map[string]struct{},
-	)
+	seenMedia := make(map[string]struct{})
 
 	for _, mediaURL := range mediaURLs {
 		mediaURL = strings.TrimSpace(mediaURL)
@@ -363,21 +273,11 @@ func (c *TwilioClient) SendWhatsApp(
 
 		seenMedia[mediaURL] = struct{}{}
 
-		form.Add(
-			"MediaUrl",
-			mediaURL,
-		)
+		form.Add("MediaUrl", mediaURL)
 	}
 
-	if strings.TrimSpace(
-		c.WhatsAppStatusCallbackURL,
-	) != "" {
-		form.Set(
-			"StatusCallback",
-			strings.TrimSpace(
-				c.WhatsAppStatusCallbackURL,
-			),
-		)
+	if strings.TrimSpace(c.WhatsAppStatusCallbackURL) != "" {
+		form.Set("StatusCallback", strings.TrimSpace(c.WhatsAppStatusCallbackURL))
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -387,47 +287,28 @@ func (c *TwilioClient) SendWhatsApp(
 		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
-		return "", fmt.Errorf(
-			"twilio: build WhatsApp request: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: build WhatsApp request: %w", err)
 	}
 
-	req.SetBasicAuth(
-		c.AccountSID,
-		c.AuthToken,
-	)
-
-	req.Header.Set(
-		"Content-Type",
-		"application/x-www-form-urlencoded",
-	)
+	req.SetBasicAuth(c.AccountSID, c.AuthToken)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf(
-			"twilio: WhatsApp request failed: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: WhatsApp request failed: %w", err)
 	}
 
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf(
-			"twilio: read WhatsApp response: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: read WhatsApp response: %w", err)
 	}
 
 	var out twilioMessageResponse
 
 	if err := json.Unmarshal(bodyBytes, &out); err != nil {
-		return "", fmt.Errorf(
-			"twilio: decode WhatsApp response: %w",
-			err,
-		)
+		return "", fmt.Errorf("twilio: decode WhatsApp response: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusMultipleChoices {
@@ -451,37 +332,26 @@ func (c *TwilioClient) SendWhatsApp(
 	out.SID = strings.TrimSpace(out.SID)
 
 	if out.SID == "" {
-		return "", fmt.Errorf(
-			"twilio: WhatsApp response contained no SID",
-		)
+		return "", fmt.Errorf("twilio: WhatsApp response contained no SID")
 	}
 
 	return out.SID, nil
 }
 
-func (c *TwilioClient) HangupCall(
-	ctx context.Context,
-	callSID string,
-) error {
+func (c *TwilioClient) HangupCall(ctx context.Context, callSID string) error {
 	if c == nil {
-		return fmt.Errorf(
-			"twilio: client is nil",
-		)
+		return fmt.Errorf("twilio: client is nil")
 	}
 
 	if strings.TrimSpace(c.AccountSID) == "" ||
 		strings.TrimSpace(c.AuthToken) == "" {
-		return fmt.Errorf(
-			"twilio: missing credentials",
-		)
+		return fmt.Errorf("twilio: missing credentials")
 	}
 
 	callSID = strings.TrimSpace(callSID)
 
 	if callSID == "" {
-		return fmt.Errorf(
-			"twilio: missing call SID",
-		)
+		return fmt.Errorf("twilio: missing call SID")
 	}
 
 	endpoint := fmt.Sprintf(
@@ -500,38 +370,22 @@ func (c *TwilioClient) HangupCall(
 		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"twilio: build hangup request: %w",
-			err,
-		)
+		return fmt.Errorf("twilio: build hangup request: %w", err)
 	}
 
-	req.SetBasicAuth(
-		c.AccountSID,
-		c.AuthToken,
-	)
-
-	req.Header.Set(
-		"Content-Type",
-		"application/x-www-form-urlencoded",
-	)
+	req.SetBasicAuth(c.AccountSID, c.AuthToken)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf(
-			"twilio: hangup request failed: %w",
-			err,
-		)
+		return fmt.Errorf("twilio: hangup request failed: %w", err)
 	}
 
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf(
-			"twilio: read hangup response: %w",
-			err,
-		)
+		return fmt.Errorf("twilio: read hangup response: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusMultipleChoices {
